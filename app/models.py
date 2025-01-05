@@ -1,5 +1,5 @@
 from django.db import models
-from django.contrib.auth.models import User
+from django.contrib.auth.models import User, AbstractUser
 from datetime import date
 from decimal import Decimal
 from django.core.exceptions import ValidationError
@@ -50,6 +50,7 @@ class Branch(models.Model):
     branch_code = models.IntegerField( unique=True, default= 1)
     location = models.CharField(max_length=255,null = True, blank = True)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='branches', default= 1)
+    manager = models.OneToOneField(User, on_delete=models.CASCADE, related_name='branch_manager', null=True, blank=True)
 
     def __str__(self):
         return self.name
@@ -69,7 +70,7 @@ class Branch(models.Model):
 
 class InsurancePolicy(models.Model):
     id = models.BigAutoField(primary_key=True)
-    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='insurance_policies')
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='insurance_policies', default=1)
     name = models.CharField(max_length=200)
     policy_type= models.CharField(max_length=50, choices=POLICY_TYPES, default='Indroment')
     min_sum_assured = models.DecimalField(max_digits=12, decimal_places=2, default=500.00)
@@ -374,7 +375,8 @@ class ClaimProcessing(models.Model):
 # Premium Payment Tracking
 class PremiumPayment(models.Model):
     id = models.BigAutoField(primary_key=True)
-    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='premium_payments')
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='premium_payments', default=1)
+    branch = models.ForeignKey(Branch, on_delete=models.CASCADE, related_name='premium_payments')
     policy_holder = models.ForeignKey(PolicyHolder, related_name="premium_payments", on_delete=models.CASCADE)
     annual_premium = models.DecimalField(max_digits=12, decimal_places=2)
     amount = models.DecimalField(max_digits=12, decimal_places=2)  # Interval payment

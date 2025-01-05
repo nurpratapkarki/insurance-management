@@ -379,7 +379,7 @@ class PaymentProcessingAdmin( CompanyFilterMixin,admin.ModelAdmin):
 # Register Branch
 @admin.register(Branch)
 class BranchAdmin(CompanyFilterMixin ,admin.ModelAdmin):
-    list_display = ('id', 'name', 'location')
+    list_display = ('branch_code', 'name', 'location')
     search_fields = ('name',)
     ordering = ('-id',)
     def get_queryset(self, request):
