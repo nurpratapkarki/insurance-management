@@ -245,18 +245,16 @@ class PremiumPaymentForm(forms.ModelForm):
 # Register Premium Payment
 @admin.register(PremiumPayment)
 class PremiumPaymentAdmin(CompanyFilterMixin, admin.ModelAdmin):
-    list_display = ('id', 'policy_holder', 'amount', 'annual_premium', 'payment_date', 'status')
-    # readonly_fields = ('annual_premium', 'amount')  # Non-editable fields
+    list_display = ('id', 'policy_holder', 'annual_premium', 'amount', 'payment_date', 'status')
     list_filter = ('status', 'payment_date', 'due_date', 'company')
     search_fields = ('policy_holder__first_name', 'policy_holder__last_name', 'status')
     ordering = ('-payment_date',)
     class Media:
         js = ('js/premium_payment_admin.js',)
-        
     def get_form(self, request, obj=None, **kwargs):
         form = super().get_form(request, obj, **kwargs)
 
-        # Prepopulate annual_premium based on selected policy_holder
+        # Prepopulate premium values for new entries
         if not obj and 'policy_holder' in request.GET:
             policy_holder_id = request.GET.get('policy_holder')
             try:
@@ -264,32 +262,18 @@ class PremiumPaymentAdmin(CompanyFilterMixin, admin.ModelAdmin):
                 premium_payment = PremiumPayment(policy_holder=policy_holder)
                 _, loaded_annual_premium, interval_payment = premium_payment.calculate_premium()
 
-                # Set initial values for non-editable fields
                 form.base_fields['annual_premium'].initial = loaded_annual_premium
                 form.base_fields['amount'].initial = interval_payment
-
             except PolicyHolder.DoesNotExist:
                 pass
 
         return form
 
     def save_model(self, request, obj, form, change):
-        """
-        Override save_model to ensure calculations are up-to-date on save.
-        """
+        # Calculate premiums before saving
         if not obj.annual_premium or not obj.amount:
-            _, loaded_annual_premium, interval_payment = obj.calculate_premium()
-            obj.annual_premium = loaded_annual_premium
-            obj.amount = interval_payment
+            _, obj.annual_premium, obj.amount = obj.calculate_premium()
         super().save_model(request, obj, form, change)
-
-        
-    def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        if db_field.name == "policy_holder":
-            kwargs["queryset"] = PolicyHolder.objects.all()
-        return super().formfield_for_foreignkey(db_field, request, **kwargs)
-
-    
 
     def add_payment(self, request, queryset):
         """
@@ -315,29 +299,24 @@ class PremiumPaymentAdmin(CompanyFilterMixin, admin.ModelAdmin):
 def update_premium_payments_on_policyholder_change(sender, instance, **kwargs):
     premium_payments = PremiumPayment.objects.filter(policy_holder=instance)
     for payment in premium_payments:
-        # Calculate base annual premium including ADB and PTD
-        base_premium = instance.sum_assured * Decimal(instance.policy.fixed_premium_ratio / 100)
-        adb_amount = instance.sum_assured * Decimal(instance.policy.adb_percentage / 100) if instance.include_adb else Decimal(0)
-        ptd_amount = instance.sum_assured * Decimal(instance.policy.ptd_percentage / 100) if instance.include_ptd else Decimal(0)
-        
-        payment.annual_premium = base_premium + adb_amount + ptd_amount
-        payment.amount = payment.calculate_premium()[2]  # Get the interval payment amount
+        _, loaded_annual_premium, interval_payment = payment.calculate_premium()
+        payment.annual_premium = loaded_annual_premium
+        payment.amount = interval_payment
         payment.save()
-# Signal to update PremiumPayment when InsurancePolicy changes
+
 @receiver(post_save, sender=InsurancePolicy)
 def update_premium_payments_on_policy_change(sender, instance, **kwargs):
     policy_holders = instance.policy_holders.all()
     for policy_holder in policy_holders:
         premium_payments = PremiumPayment.objects.filter(policy_holder=policy_holder)
         for payment in premium_payments:
-            # Calculate base annual premium including ADB and PTD
-            base_premium = policy_holder.sum_assured * Decimal(instance.fixed_premium_ratio / 100)
-            adb_amount = policy_holder.sum_assured * Decimal(instance.adb_percentage / 100) if policy_holder.include_adb else Decimal(0)
-            ptd_amount = policy_holder.sum_assured * Decimal(instance.ptd_percentage / 100) if policy_holder.include_ptd else Decimal(0)
-            
-            payment.annual_premium = base_premium + adb_amount + ptd_amount
-            payment.amount = payment.calculate_premium()[2]  # Get the interval payment amount
+            _, loaded_annual_premium, interval_payment = payment.calculate_premium()
+            payment.annual_premium = loaded_annual_premium
+            payment.amount = interval_payment
             payment.save()
+
+
+
 # Register Employee Position
 @admin.register(EmployeePosition)
 class EmployeePositionAdmin(admin.ModelAdmin):

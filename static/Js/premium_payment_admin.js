@@ -3,9 +3,11 @@ document.addEventListener('DOMContentLoaded', function () {
     const policyHolderSelect = document.querySelector('#id_policy_holder'); // The dropdown
     const annualPremiumField = document.querySelector('#id_annual_premium'); // The annual premium field
     const amountField = document.querySelector('#id_amount'); // The interval payment field
+    const form = document.querySelector('form'); // The main form
 
-    annualPremiumField.disabled = true; // Disable the annual premium field
-    amountField.disabled = true; // Disable the amount field
+    // Disable the fields initially
+    annualPremiumField.disabled = true;
+    amountField.disabled = true;
 
     /**
      * Updates premium fields based on the selected policy holder.
@@ -28,16 +30,14 @@ document.addEventListener('DOMContentLoaded', function () {
                 return response.json();
             })
             .then(data => {
-                
-                
                 if (data.error) {
                     console.error(data.error);
                     annualPremiumField.value = '0.00';
                     amountField.value = '0.00';
                 } else {
                     // Update fields with calculated values
-                    annualPremiumField.value = data.loaded_annual_premium;
-                    amountField.value = data.interval_payment;
+                    annualPremiumField.value = data.loaded_annual_premium || '0.00';
+                    amountField.value = data.interval_payment || '0.00';
                 }
             })
             .catch(error => {
@@ -54,5 +54,40 @@ document.addEventListener('DOMContentLoaded', function () {
         const selectedPolicyHolderId = this.value; // Get the selected policy holder ID
         console.log('PolicyHolder selected:', selectedPolicyHolderId); // Debugging log
         updatePremiumFields(selectedPolicyHolderId);
+    });
+
+    /**
+     * Prevent form default reset behavior and ensure fields are submitted correctly.
+     */
+    form.addEventListener('submit', function (event) {
+        event.preventDefault(); // Prevent default form submission
+
+        // Enable fields to include them in the submission
+        annualPremiumField.disabled = false;
+        amountField.disabled = false;
+
+        // Submit the form using JavaScript
+        const formData = new FormData(form); // Collect form data
+        const actionUrl = form.action; // Get the form's action URL
+
+        fetch(actionUrl, {
+            method: 'POST',
+            body: formData,
+        })
+            .then(response => {
+                if (response.ok) {
+                    console.log('Form submitted successfully!');
+                    window.location.reload(); // Reload or redirect as needed
+                } else {
+                    return response.json().then(data => {
+                        console.error('Submission failed:', data);
+                        alert('Error submitting form. Please check your inputs.');
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error submitting form:', error);
+                alert('An unexpected error occurred while submitting the form.');
+            });
     });
 });

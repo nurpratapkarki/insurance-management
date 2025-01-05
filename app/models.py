@@ -378,8 +378,8 @@ class PremiumPayment(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='premium_payments', default=1)
     branch = models.ForeignKey(Branch, on_delete=models.CASCADE, related_name='premium_payments')
     policy_holder = models.ForeignKey(PolicyHolder, related_name="premium_payments", on_delete=models.CASCADE)
-    annual_premium = models.DecimalField(max_digits=12, decimal_places=2)
-    amount = models.DecimalField(max_digits=12, decimal_places=2)  # Interval payment
+    annual_premium = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)  # Interval payment
     total_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)  # Track actual payments made
     payment_date = models.DateField(auto_now_add=True)
     due_date = models.DateField()
@@ -390,18 +390,22 @@ class PremiumPayment(models.Model):
             policy = self.policy_holder.policy
             sum_assured = self.policy_holder.sum_assured
 
+            # Fixed premium calculation
             fixed_premium = sum_assured * Decimal(policy.fixed_premium_ratio / 100)
+
+            # Optional charges
             adb_amount = sum_assured * Decimal(policy.adb_percentage / 100) if self.policy_holder.include_adb else Decimal(0)
             ptd_amount = sum_assured * Decimal(policy.ptd_percentage / 100) if self.policy_holder.include_ptd else Decimal(0)
 
+            # Base annual premium
             base_annual_premium = fixed_premium + adb_amount + ptd_amount
 
-            # Fetch loading charges for the selected interval
+            # Loading charges
             interval = self.policy_holder.payment_interval
             loading_charge = policy.loading_charges.filter(interval=interval).first()
             loading_percentage = Decimal(loading_charge.percentage if loading_charge else 0)
 
-            # Calculate loaded annual premium and interval payment
+            # Final premium calculations
             loaded_annual_premium = base_annual_premium * (1 + loading_percentage / 100)
             intervals = {"monthly": 12, "quarterly": 4, "semi_annual": 2, "annual": 1}
             interval_count = intervals.get(interval, 1)
@@ -411,20 +415,9 @@ class PremiumPayment(models.Model):
         except Exception as e:
             raise ValidationError(f"Premium calculation failed: {str(e)}")
 
-
     def save(self, *args, **kwargs):
-        # Calculate base annual premium including ADB and PTD
-        policy = self.policy_holder.policy
-        sum_assured = self.policy_holder.sum_assured
-        
-        # Fixed premium + ADB + PTD (base annual without loading)
-        base_premium = sum_assured * Decimal(policy.fixed_premium_ratio / 100)
-        adb_amount = sum_assured * Decimal(policy.adb_percentage / 100) if self.policy_holder.include_adb else Decimal(0)
-        ptd_amount = sum_assured * Decimal(policy.ptd_percentage / 100) if self.policy_holder.include_ptd else Decimal(0)
-        
-        self.annual_premium = base_premium + adb_amount + ptd_amount
-        self.amount = self.calculate_premium()[2]  # Get the interval payment amount
-        
+        # Ensure annual_premium and amount are always recalculated before saving
+        _, self.annual_premium, self.amount = self.calculate_premium()
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -433,6 +426,8 @@ class PremiumPayment(models.Model):
     class Meta:
         verbose_name = 'Premium Payment'
         verbose_name_plural = 'Premium Payments'
+
+
 # Employee and Roles
 class EmployeePosition(models.Model):
     id = models.BigAutoField(primary_key=True)
@@ -449,6 +444,7 @@ class EmployeePosition(models.Model):
 class Employee(models.Model):
     id = models.BigAutoField(primary_key=True)
     company = models.ForeignKey(Company,  on_delete=models.CASCADE, related_name= 'employees', default= 1)
+    branch = models.ForeignKey(Branch, on_delete=models.CASCADE, null=True, blank=True)
     name = models.CharField(max_length=50)
     address = models.CharField(max_length=100)
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
