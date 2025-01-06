@@ -35,8 +35,7 @@ class CompanyFilterMixin:
                     pass  # If no related model or company field exists, do nothing
 
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
-
-
+    
 # Register the Company
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
@@ -61,7 +60,9 @@ class LoadingChargeInline(admin.StackedInline):
     extra = 1  # Number of empty forms to display
     can_delete = True  # Allow deletion of inline items
     verbose_name = "Loading Charge"
+    depth = 10
     verbose_name_plural = "Loading Charges"
+    
 # Register Insurance Policy
 @admin.register(InsurancePolicy)
 class InsurancePolicyAdmin(CompanyFilterMixin,admin.ModelAdmin):
