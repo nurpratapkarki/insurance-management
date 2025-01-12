@@ -5,7 +5,7 @@ GENDER_CHOICES = [
 ]
 
 POLICY_TYPES = [
-    ("Indroment", "Indroment"),
+    ("Indownment", "Indownment"),
     ("Trem", "Trem"),
 ]
 
@@ -49,3 +49,5 @@ EMPLOYEE_STATUS_CHOICES = [
         ('TERMINATED', 'Terminated'),
         ('ON_LEAVE', 'On Leave')
     ]
+EXE_FREQ_CHOICE = [("None", "None"), ("Occasional", "Occasional"), ("Regular", "Regular")]
+RISK_CHOICES = [('low', 'Low'), ('medium', 'Medium'), ('high', 'High')]
