@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from django.core.exceptions import ValidationError
 from django.db.models.signals import post_save
+from django.utils.timezone import now
 from django.dispatch import receiver
 from .constants import (
     GENDER_CHOICES,
@@ -16,9 +17,12 @@ from .constants import (
     PROCESSING_STATUS_CHOICES,
     EMPLOYEE_STATUS_CHOICES,
     EXE_FREQ_CHOICE,
-    RISK_CHOICES
+    RISK_CHOICES,
+    PAYMENT_CHOICES
 )
+import logging
 
+logger = logging.getLogger(__name__)
 
 # Create your models here.
 class Occupation(models.Model):
@@ -97,10 +101,10 @@ class InsurancePolicy(models.Model):
     company = models.ForeignKey(
         'Company', on_delete=models.CASCADE, related_name='insurance_policies')
     name = models.CharField(max_length=200)
+    policy_type = models.CharField(max_length=50, choices=POLICY_TYPES, default='Term')
+    base_multiplier = models.DecimalField(max_digits=5, decimal_places=2, default=1.0)
     min_sum_assured = models.DecimalField(max_digits=12, decimal_places=2, default=500.00)
     max_sum_assured = models.DecimalField(max_digits=12, decimal_places=2, default=10000.00)
-    quarterly_loading = models.DecimalField(max_digits=5, decimal_places=2, default=1.5)  # Quarterly loading %
-    semi_annual_loading = models.DecimalField(max_digits=5, decimal_places=2, default=1.0)  # Semi-annual loading %
     adb_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)  # ADB charge %
     ptd_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)  # PTD charge %
     include_adb = models.BooleanField(default=False)
@@ -114,6 +118,10 @@ class InsurancePolicy(models.Model):
     class Meta:
         verbose_name = "Insurance Policy"
         verbose_name_plural = "Insurance Policies"
+    def clean(self):
+        super().clean()
+        if self.policy_type == "Term" and self.base_multiplier != 1.0:
+            raise ValidationError("Base multiplier for Term insurance must always be 1.0.")
 
 
 #  Agent Application
@@ -176,6 +184,8 @@ class AgentApplication(models.Model):
         ]
 
 
+#Insurance Policy ends
+
 # Sales Agent
 
 class SalesAgent(models.Model):
@@ -228,6 +238,37 @@ class SalesAgent(models.Model):
             models.Index(fields=['status']),
         ]
 
+class DurationFactor(models.Model):
+    company = models.ForeignKey('Company', on_delete=models.CASCADE,)
+    min_duration = models.PositiveIntegerField(help_text="Minimum duration in years")
+    max_duration = models.PositiveIntegerField(help_text="Maximum duration in years")
+    factor = models.DecimalField(max_digits=5, decimal_places=2)
+    policy_type = models.CharField(max_length=50, choices=POLICY_TYPES)
+    
+    class Meta:
+        unique_together = ['company', 'min_duration', 'max_duration', 'policy_type']
+        ordering = ['min_duration']
+
+    def clean(self):
+        if self.min_duration >= self.max_duration:
+            raise ValidationError("Minimum duration must be less than maximum duration")
+        
+        # Check for overlapping ranges for same company and policy type
+        overlapping = DurationFactor.objects.filter(
+            company=self.company,
+            policy_type=self.policy_type,
+            min_duration__lte=self.max_duration,
+            max_duration__gte=self.min_duration
+        ).exclude(pk=self.pk)
+        
+        if overlapping.exists():
+            raise ValidationError("Duration ranges cannot overlap for the same company and policy type")
+
+    def __str__(self):
+        return f"{self.company} - {self.policy_type} ({self.min_duration}-{self.max_duration} years): {self.factor}x"
+    
+    
+#policy holders start
 
 class PolicyHolder(models.Model):
     id = models.BigAutoField(primary_key=True)
@@ -272,7 +313,7 @@ class PolicyHolder(models.Model):
         upload_to="policyHolder")
     document_back = models.ImageField(
         upload_to="policyHolder")
-    pan_Number = models.CharField(max_length=20, blank=True, null=True)
+    pan_number = models.CharField(max_length=20, blank=True, null=True)
     pan_front = models.ImageField(
         upload_to='policy_holders', null=True, blank=True)
     pan_back = models.ImageField(
@@ -293,7 +334,7 @@ class PolicyHolder(models.Model):
     nominee_pp_photo = models.ImageField(
         upload_to='policyHolder')
     nominee_relation = models.CharField(max_length=255)
-    provience = models.CharField(max_length=255, choices=PROVINCE_CHOICES)
+    province = models.CharField(max_length=255, choices=PROVINCE_CHOICES, default='Karnali')
     district = models.CharField(max_length=255)
     municipality = models.CharField(max_length=255)
     ward = models.CharField(max_length=255)
@@ -309,15 +350,11 @@ class PolicyHolder(models.Model):
     max_length=50, 
     choices=RISK_CHOICES, 
     blank=True, 
-    null=True
-)
-    
-
-
+    null=True)    
     policy = models.ForeignKey(
         InsurancePolicy, related_name='policy_holders', on_delete=models.CASCADE, blank=True, null=True
     )
-    heath_history = models.CharField(max_length=500, null=True, blank=True)
+    health_history = models.CharField(max_length=500, null=True, blank=True)
     habits = models.CharField(max_length=500, null=True, blank=True)
     exercise_frequency = models.CharField(
         max_length=50,
@@ -325,7 +362,7 @@ class PolicyHolder(models.Model):
         blank=True,
         null=True
     )
-    alcholic = models.BooleanField(default= False)
+    alcoholic = models.BooleanField(default= False)
     smoker = models.BooleanField(default= False)
     include_adb = models.BooleanField(default=False)
     include_ptd = models.BooleanField(default=False)
@@ -350,81 +387,98 @@ class PolicyHolder(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')
     payment_status = models.CharField(
         max_length=50, choices=PROCESSING_STATUS_CHOICES, default="Due")
+    start_date = models.DateField(default=date.today)
 
-    @property
-    def age(self):
-        from datetime import date
-        if self.date_of_birth:
-            today = date.today()
-            return today.year - self.date_of_birth.year - (
-                (today.month, today.day) < (self.date_of_birth.month, self.date_of_birth.day))
-        return None
-
-    def save(self, *args, **kwargs):
-        if self.status == 'Active' and not self.policy_number:
-            # Generate policy number if not already set
-            if not self.branch:
-                raise ValueError("Branch is required to generate the policy number.")
-            last_holder = PolicyHolder.objects.filter(branch=self.branch).order_by('-id').first()
-            last_number = int(last_holder.policy_number.split(self.branch.branch_code)[-1]) if last_holder else 0
-            self.policy_number = f"{self.branch.branch_code}{str(last_number + 1).zfill(5)}"
-
-        super().save(*args, **kwargs)
-    def clean(self):
-        # Validate the age range
-        if self.date_of_birth:
-            today = date.today()
-            age = today.year - self.date_of_birth.year - (
-                (today.month, today.day) < (
-                    self.date_of_birth.month, self.date_of_birth.day)
-            )
-            if age < 18 or age > 60:
-                raise ValidationError(
-                    f"Age must be between 18 and 60. The provided age is {
-                        age}."
-                )
-
-    def save(self, *args, **kwargs):
-        
-
-        if not self.policy_number:
-            # Fetch last policy for the same company and branch
-            last_policy = PolicyHolder.objects.filter(
-                company=self.company, branch=self.branch).order_by('id').last()
-
-        # Extract the last number from the last policy
-            last_number = int(
-                last_policy.policy_number[-6:]) if last_policy and last_policy.policy_number[-6:].isdigit() else 0
-
-        # Generate new policy number
-            self.policy_number = f"{self.company.company_code}{
-                self.branch.branch_code}{str(last_number + 1).zfill(5)}"
-
-            super().save(*args, **kwargs)
-
-        # Calculate age automatically
-    @property
-    def age(self):
-        if self.date_of_birth:
-            today = date.today()
-            return today.year - self.date_of_birth.year - (
-                (today.month, today.day) < (self.date_of_birth.month, self.date_of_birth.day)
-            )
-        return None
+    maturity_date = models.DateField(null=True, blank=True)
     
+    def clean(self):
+        """Validate the policy holder data"""
+        errors = {}
+        
+        # Validate sum assured
+        if self.sum_assured and self.policy:
+            if self.sum_assured < self.policy.min_sum_assured:
+                errors['sum_assured'] = f"Sum assured must be at least {self.policy.min_sum_assured}."
+            elif self.sum_assured > self.policy.max_sum_assured:
+                errors['sum_assured'] = f"Sum assured cannot exceed {self.policy.max_sum_assured}."
+        
+        # Validate age
+        if self.date_of_birth:
+            age = self.calculate_age()
+            if age < 18 or age > 60:
+                errors['date_of_birth'] = f"Age must be between 18 and 60. Current age: {age}."
+        
+        if errors:
+            raise ValidationError(errors)
+
+    def calculate_age(self):
+        """Calculate age based on date of birth"""
+        if self.date_of_birth:
+            today = now().date()
+            return today.year - self.date_of_birth.year - ((today.month, today.day) < (self.date_of_birth.month, self.date_of_birth.day))
+        return None
+
+    def calculate_maturity_date(self):
+        """Calculate maturity date based on start date and duration"""
+        if self.start_date and self.duration_years:
+            return self.start_date.replace(year=self.start_date.year + self.duration_years)
+        return None
+
+    def generate_policy_number(self):
+        """Generate a unique policy number"""
+        if not self.company or not self.branch:
+            return None
+            
+        try:
+            last_holder = PolicyHolder.objects.filter(
+                company=self.company,
+                branch=self.branch
+            ).exclude(policy_number__isnull=True).order_by('-policy_number').first()
+            
+            if last_holder and last_holder.policy_number:
+                # Extract the numeric part
+                last_number = int(last_holder.policy_number[-5:])
+            else:
+                last_number = 0
+                
+            new_number = last_number + 1
+            return f"{self.company.company_code}{self.branch.branch_code}{str(new_number).zfill(5)}"
+        except (ValueError, AttributeError):
+            return None
+
+    def save(self, *args, **kwargs):
+        """Override save method to handle automatic field updates"""
+        # Calculate age if date of birth is provided
+        if self.date_of_birth:
+            self.age = self.calculate_age()
+        
+        # Generate policy number if status is Active and number doesn't exist
+        if self.status == 'Active' and not self.policy_number:
+            self.policy_number = self.generate_policy_number()
+        
+        # Set maturity date if not already set
+        if not self.maturity_date:
+            self.maturity_date = self.calculate_maturity_date()
+        
+        # Run full validation
+        self.full_clean()
+        
+        super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.first_name} {self.last_name}"
+        """String representation of the policy holder"""
+        policy_num = self.policy_number if self.policy_number else 'Pending'
+        return f"{self.first_name} {self.last_name} ({policy_num})"
 
     class Meta:
-        verbose_name = 'Policy Holder'
-        verbose_name_plural = 'Policy Holders'
         indexes = [
-            models.Index(fields=['company']),
-            models.Index(fields=['agent']),
+            models.Index(fields=['company', 'branch']),
             models.Index(fields=['policy']),
-            models.Index(fields=['payment_status']),
-        ]
+        ]        
+#policy holders end
+
+
+
 # claim requestes
 
 
@@ -549,19 +603,30 @@ class Underwriting(models.Model):
     )
 
     def save(self, *args, **kwargs):
-        self.risk_assessment_score = self.calculate_risk()
-        self.risk_category = self.determine_risk_category()
+        try:
+            self.risk_assessment_score = self.calculate_risk()
+            self.risk_category = self.determine_risk_category()
+        except ValidationError as e:
+            raise ValidationError(f"Error calculating risk: {e}")
+        except Exception as e:
+            raise Exception(f"Unexpected error during risk calculation: {e}")
         super().save(*args, **kwargs)
 
+
     def calculate_risk(self):
-        # Example: Calculate risk score based on age and occupation
+        """Calculate risk score based on age and occupation."""
         age = self.policy_holder.age
+        if age is None:
+            raise ValidationError("PolicyHolder's age is not set. Ensure the date of birth is provided.")
+    
         occupation_risk = {
             'Low': 10,
             'Moderate': 20,
             'High': 30,
-        }.get(self.policy_holder.occupation.risk_category, 20)
+        }.get(self.policy_holder.occupation.risk_category, 20)  # Default to Moderate risk if undefined
+
         return min(age + occupation_risk, 100)  # Capping at 100
+
 
     def determine_risk_category(self):
         score = self.risk_assessment_score
@@ -570,71 +635,180 @@ class Underwriting(models.Model):
         elif score < 70:
             return 'Moderate'
         return 'High'
-class PremiumPayment(models.Model):
-    policy_holder = models.ForeignKey('PolicyHolder', on_delete=models.CASCADE, related_name='premium_payments')
-    annual_premium = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
-    interval_payment = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
-    total_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     
-    def get_mortality_rate(self):
-        """Get the appropriate mortality rate based on policy holder's age"""
-        age = self.policy_holder.age
-        company = self.policy_holder.company
+class PremiumPayment(models.Model):
+
+    policy_holder = models.ForeignKey('PolicyHolder', on_delete=models.CASCADE, related_name='premium_payments')
+    annual_premium = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
+    interval_payment = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
+    total_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
+    paid_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)  # Amount to be added
+    next_payment_date = models.DateField(null=True, blank=True)
+    fine_due = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_premium = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
+    remaining_premium = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
+    payment_status = models.CharField(max_length=255, choices=PAYMENT_CHOICES, default='Unpaid')
+    
+    def calculate_premium(self):
+        """Calculate total and interval premiums with company-specific duration factors."""
+        policy = self.policy_holder.policy
+        sum_assured = self.policy_holder.sum_assured
+        duration_years = self.policy_holder.duration_years
+
+        if not sum_assured or not policy:
+            raise ValidationError("Sum assured and insurance policy are required.")
+
+        # Get mortality rate
+        mortality_rate = self.get_mortality_rate()
+        base_premium = (sum_assured * Decimal(mortality_rate)) / Decimal(1000)
+
+        # Get company-specific duration factor
+        duration_factor = self.get_duration_factor()
+
+        # Apply policy type multiplier and duration factor
+        if policy.policy_type == "Endowment":
+            adjusted_premium = base_premium * policy.base_multiplier * duration_factor
+        else:
+            # Term insurance - always uses base premium
+            adjusted_premium = base_premium
+
+        # Calculate add-on charges based on sum assured
+        adb_charge = Decimal('0.00')
+        if policy.include_adb:
+            adb_charge = (sum_assured * Decimal(policy.adb_percentage)) / Decimal(100)
+
+        ptd_charge = Decimal('0.00')
+        if policy.include_ptd:
+            ptd_charge = (sum_assured * Decimal(policy.ptd_percentage)) / Decimal(100)
+
+        # Total annual premium including all charges
+        annual_premium = adjusted_premium + adb_charge + ptd_charge
+
+        # Calculate interval payment based on payment frequency
+        interval_mapping = {
+            "quarterly": 4,
+            "semi_annual": 2,
+            "annual": 1,
+            "Single": 1,
+        }
+        interval_count = interval_mapping.get(self.policy_holder.payment_interval, 1)
+
+        if self.policy_holder.payment_interval == "Single":
+            # For single payment, calculate the total needed for the entire duration
+            # You might want to add a discount for single payment if needed
+            # single_payment_discount = Decimal('0.90')  # 10% discount example
+            total_premium = annual_premium * Decimal(duration_years)
+            interval_payment = total_premium
+        else:
+            interval_payment = annual_premium / Decimal(interval_count)
+
+        # Round to 2 decimal places
+        annual_premium = annual_premium.quantize(Decimal('1.00'), rounding=ROUND_HALF_UP)
+        interval_payment = interval_payment.quantize(Decimal('1.00'), rounding=ROUND_HALF_UP)
+        return annual_premium, interval_payment
+
+    def get_duration_factor(self):
+        """Get appropriate duration factor based on policy duration"""
+        duration_years = self.policy_holder.duration_years
+        policy_type = self.policy_holder.policy.policy_type
         
         try:
-            mortality_rate = MortalityRate.objects.filter(
+            factor = DurationFactor.objects.get(
+                company=self.policy_holder.company,
+                policy_type=policy_type,
+                min_duration__lte=duration_years,
+                max_duration__gte=duration_years
+            )
+            return factor.factor
+        except DurationFactor.DoesNotExist:
+            # Log that no duration factor was found
+            logger.warning(
+                f"No duration factor found for company {self.policy_holder.company.id}, "
+                f"policy type {policy_type}, duration {duration_years} years. Using default factor."
+            )
+            return Decimal('1.0')  # Default factor if no range defined
+
+    def save(self, *args, **kwargs):
+        if not self.pk:  # New instance
+            self.annual_premium, self.interval_payment = self.calculate_premium()
+
+            if self.policy_holder.payment_interval == "Single":
+                self.total_premium = self.interval_payment
+            else:
+                self.total_premium = self.annual_premium * Decimal(str(self.policy_holder.duration_years))
+
+        # Convert paid_amount to Decimal if it's not already
+        if isinstance(self.paid_amount, float):
+            self.paid_amount = Decimal(str(self.paid_amount))
+    
+        # Handle new payment if paid_amount is provided
+        if self.paid_amount > 0:
+            if isinstance(self.total_paid, float):
+                self.total_paid = Decimal(str(self.total_paid))
+            self.total_paid += self.paid_amount
+            self.paid_amount = Decimal('0.00')  # Reset paid_amount after adding to total_paid
+        
+        # Update remaining premium and payment status
+        self.remaining_premium = max(self.total_premium - self.total_paid, Decimal('0.00'))
+    
+        if self.total_paid >= self.total_premium:
+            self.payment_status = 'Paid'
+        elif self.total_paid > 0:
+            self.payment_status = 'Partially Paid'
+        else:
+            self.payment_status = 'Unpaid'
+
+        # Handle fine
+        if self.fine_due > 0:
+            if isinstance(self.fine_due, float):
+                self.fine_due = Decimal(str(self.fine_due))
+            if isinstance(self.interval_payment, float):
+                self.interval_payment = Decimal(str(self.interval_payment))
+                self.interval_payment += self.fine_due
+                self.fine_due = Decimal('0.00')
+
+        # Set next payment date
+        if not self.next_payment_date and self.policy_holder.payment_interval != "Single":
+            interval_months = {
+                "quarterly": 3,
+                "semi_annual": 6,
+                "annual": 12
+            }.get(self.policy_holder.payment_interval)
+
+            if interval_months:
+                today = date.today()
+                self.next_payment_date = today.replace(
+                    month=((today.month - 1 + interval_months) % 12) + 1,
+                    year=today.year + ((today.month - 1 + interval_months) // 12)
+            )
+
+        super().save(*args, **kwargs)
+
+    def get_mortality_rate(self):
+        """Fetch mortality rate for the policyholder."""
+        age = self.policy_holder.age
+        company = self.policy_holder.company
+
+        try:
+            mortality_rate = MortalityRate.objects.get(
                 company=company,
                 age_group_start__lte=age,
                 age_group_end__gte=age
-            ).first()
-            
-            if mortality_rate:
-                return mortality_rate.rate
-            else:
-                raise ValueError(f"No mortality rate found for age {age} in company {company}")
-                
+            )
+            return mortality_rate.rate
         except MortalityRate.DoesNotExist:
-            raise ValueError(f"No mortality rate found for age {age} in company {company}")
-    
-    def calculate_premium(self):
-        """Calculate premium without saving"""
-        policy_holder = self.policy_holder
-        policy = policy_holder.policy
-        sum_assured = policy_holder.sum_assured
+            raise ValidationError(f"No mortality rate found for age {age}.")
 
-        # Base Premium from Mortality Rate
-        mortality_rate = self.get_mortality_rate()
-        base_premium = sum_assured * Decimal(str(mortality_rate / 1000))
+    class Meta:
+        verbose_name = "Premium Payment"
+        verbose_name_plural = "Premium Payments"
 
-        # ADB and PTD Charges
-        adb_charge = sum_assured * Decimal(policy.adb_percentage / 100) if policy.include_adb else Decimal(0)
-        ptd_charge = sum_assured * Decimal(policy.ptd_percentage / 100) if policy.include_ptd else Decimal(0)
+    def __str__(self):
+        return f"Premium Payment - {self.policy_holder.first_name} {self.policy_holder.last_name} ({self.payment_status})"
 
-        # Total Base Premium
-        total_base_premium = base_premium + adb_charge + ptd_charge
-
-        # Loading Charges
-        interval = policy_holder.payment_interval
-        loading_charges = {
-            'quarterly': policy.quarterly_loading,
-            'semi_annual': policy.semi_annual_loading,
-        }
-        interval_loading = Decimal(str(loading_charges.get(interval, 0))) / 100
-        annual_premium = total_base_premium * (1 + interval_loading if interval in ["quarterly", "semi_annual"] else 1)
-
-        # Interval Payments
-        interval_count = {"quarterly": 4, "semi_annual": 2, "single": 1}.get(interval, 1)
-        interval_payment = (annual_premium / interval_count).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-
-        return annual_premium, interval_payment
-
-    def save(self, *args, **kwargs):
-        if not self.pk:  # Only calculate on creation
-            self.annual_premium, self.interval_payment = self.calculate_premium()
-        super().save(*args, **kwargs)
+        
+        
 # Agent Report
-
-
 class AgentReport(models.Model):
     agent = models.ForeignKey(SalesAgent, on_delete=models.CASCADE)
     company = models.ForeignKey(
@@ -654,31 +828,3 @@ class AgentReport(models.Model):
     class Meta:
         verbose_name = 'Agent Report'
         verbose_name_plural = 'Agent Reports'
-# auto generate agent report
-
-
-@receiver(post_save, sender=PremiumPayment)
-def update_agent_report(sender, instance, **kwargs):
-    agent = instance.policy_holder.agent
-    if agent:
-        report, created = AgentReport.objects.get_or_create(
-            agent=agent,
-            company=agent.company,
-            report_date=date.today(),
-            defaults={
-                'reporting_period': 'Daily',
-                'policies_sold': 0,
-                'total_premium': Decimal(0.00),
-                'commission_earned': Decimal(0.00),
-                'target_achievement': Decimal(0.00),
-                'renewal_rate': Decimal(0.00),
-                'customer_retention': Decimal(0.00)
-            }
-        )
-        # Update the report with the new payment details
-        report.total_premium += Decimal(instance.amount)  # Convert to Decimal
-        report.policies_sold += 1  # Increment for a new policy
-        report.commission_earned += Decimal(instance.amount) * \
-            agent.commission_rate / Decimal(100)  # Ensure Decimal
-        report.save()
-

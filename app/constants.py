@@ -5,7 +5,7 @@ GENDER_CHOICES = [
 ]
 
 POLICY_TYPES = [
-    ("Indownment", "Indownment"),
+    ("Endownment", "Endownment"),
     ("Trem", "Trem"),
 ]
 
@@ -33,9 +33,13 @@ REASON_CHOICES = [
 ]
 
 STATUS_CHOICES = [
-    ("Pending", "Pending"),
-    ("Approved", "Approved"),
-    ("Rejected", "Rejected"),
+    ('Pending', 'Pending'),
+    ('Under Review', 'Under Review'),
+    ('Approved', 'Approved'),
+    ('Active', 'Active'),
+    ('Rejected', 'Rejected'),
+    ('Cancelled', 'Cancelled'),
+    ('Expired', 'Expired')
 ]
 
 PROCESSING_STATUS_CHOICES = [
@@ -51,3 +55,8 @@ EMPLOYEE_STATUS_CHOICES = [
     ]
 EXE_FREQ_CHOICE = [("None", "None"), ("Occasional", "Occasional"), ("Regular", "Regular")]
 RISK_CHOICES = [('low', 'Low'), ('medium', 'Medium'), ('high', 'High')]
+PAYMENT_CHOICES = [
+    ('Unpaid', 'Unpaid'),
+    ('Partially Paid', 'Partially Paid'),
+    ('Paid', 'Paid'),
+]

@@ -1,5 +1,7 @@
 from django.db.models.signals import post_save, pre_delete
 from django.dispatch import receiver
+from django.core.exceptions import ValidationError
+from django.db import transaction
 from decimal import Decimal
 from datetime import date
 from .models import (
@@ -12,95 +14,178 @@ from .models import (
     SalesAgent
 )
 
-# 1. PolicyHolder Signals
 @receiver(post_save, sender=PolicyHolder)
-def policy_holder_changes(sender, instance, created, **kwargs):
+def policy_holder_post_save(sender, instance, created, **kwargs):
     """
-    Handle all PolicyHolder-related updates in one signal
+    Handle all post-save operations for PolicyHolder:
+    - Creates/updates premium payments for approved/active policies
+    - Creates underwriting records for pending policies
+    - Updates related records
     """
-    if instance.status == "Approved":
-        # Create or update underwriting
-        underwriting, _ = Underwriting.objects.get_or_create(policy_holder=instance)
-        underwriting.save()  # This triggers risk recalculation
-        
-        # Create initial premium payment if new
-        if created:
-            PremiumPayment.objects.create(policy_holder=instance)
+    try:
+        with transaction.atomic():
+            # Create or update PremiumPayment for approved/active policies
+            if instance.status in ['Approved', 'Active']:
+                premium_payment, created = PremiumPayment.objects.get_or_create(
+                    policy_holder=instance,
+                    defaults={
+                        'payment_interval': instance.payment_interval,
+                        'payment_mode': instance.payment_mode
+                    }
+                )
+                
+                if created or instance.sum_assured != getattr(premium_payment, '_original_sum_assured', None):
+                    premium_payment.calculate_premium()
+                    premium_payment._original_sum_assured = instance.sum_assured
+                    premium_payment.save()
             
-        # Update existing premium payments
-        for payment in instance.premium_payments.all():
-            payment.save()  # This triggers premium recalculation
+            # Create Underwriting record for pending policies
+            if instance.status == 'Pending':
+                Underwriting.objects.get_or_create(
+                    policy_holder=instance,
+                    defaults={
+                        'risk_assessment': 'Pending',
+                        'medical_assessment': 'Pending'
+                    }
+                )
 
-# 2. Underwriting Signal
-@receiver(post_save, sender=Underwriting)
-def underwriting_changes(sender, instance, **kwargs):
-    """
-    Update premium payments when underwriting changes
-    """
-    for payment in instance.policy_holder.premium_payments.all():
-        payment.save()  # Triggers premium recalculation
+    except Exception as e:
+        print(f"Error in policy_holder_post_save signal: {str(e)}")
 
-# 3. Insurance Policy Signal
-@receiver(post_save, sender=InsurancePolicy)
-def policy_changes(sender, instance, **kwargs):
+@receiver(pre_delete, sender=PolicyHolder)
+def cleanup_policy_holder(sender, instance, **kwargs):
     """
-    Update all related premium payments when policy terms change
+    Clean up related records when PolicyHolder is deleted:
+    - Deletes premium payments
+    - Deletes underwriting records
+    - Removes uploaded documents
     """
-    for policy_holder in instance.policy_holders.all():
-        for payment in policy_holder.premium_payments.all():
-            payment.save()  # Triggers premium recalculation
+    try:
+        # Delete related records
+        PremiumPayment.objects.filter(policy_holder=instance).delete()
+        Underwriting.objects.filter(policy_holder=instance).delete()
+        
+        # Delete uploaded files
+        file_fields = [
+            'document_front', 
+            'document_back', 
+            'pp_photo', 
+            'pan_front', 
+            'pan_back', 
+            'nominee_document_front',
+            'nominee_document_back', 
+            'nominee_pp_photo',
+            'past_medical_report',
+            'recent_medical_reports'
+        ]
+        
+        for field in file_fields:
+            document = getattr(instance, field, None)
+            if document:
+                try:
+                    document.delete(save=False)
+                except Exception as e:
+                    print(f"Error deleting {field}: {str(e)}")
+                
+    except Exception as e:
+        print(f"Error in cleanup_policy_holder signal: {str(e)}")
 
-# 4. Premium Payment Signal
 @receiver(post_save, sender=PremiumPayment)
-def premium_payment_changes(sender, instance, created, **kwargs):
+def update_policy_holder_payment_status(sender, instance, **kwargs):
     """
-    Handle premium payment updates and agent report updates
+    Update PolicyHolder payment status when premium payment changes
     """
-    if created:
-        # Update agent report
-        agent = instance.policy_holder.agent
-        if agent:
-            report, created = AgentReport.objects.get_or_create(
-                agent=agent,
-                company=agent.company,
-                report_date=date.today(),
-                defaults={
-                    'reporting_period': 'Daily',
-                    'policies_sold': 0,
-                    'total_premium': Decimal('0.00'),
-                    'commission_earned': Decimal('0.00'),
-                    'target_achievement': Decimal('0.00'),
-                    'renewal_rate': Decimal('0.00'),
-                    'customer_retention': Decimal('0.00')
-                }
+    try:
+        policy_holder = instance.policy_holder
+        
+        # Calculate new status based on payment amounts
+        if instance.total_paid >= instance.total_premium_due:
+            new_status = 'Paid'
+        elif instance.total_paid > 0:
+            new_status = 'Partially Paid'
+        else:
+            new_status = 'Due'
+            
+        # Update only if status has changed
+        if policy_holder.payment_status != new_status:
+            PolicyHolder.objects.filter(id=policy_holder.id).update(
+                payment_status=new_status
             )
             
-            # Update report metrics
-            report.total_premium += instance.interval_payment
-            report.policies_sold += 1
-            report.commission_earned += instance.interval_payment * agent.commission_rate / Decimal('100')
-            report.save()
+    except Exception as e:
+        print(f"Error updating payment status: {str(e)}")
 
-# 5. Agent Application Signal
+@receiver(post_save, sender=PremiumPayment)
+def update_agent_report(sender, instance, **kwargs):
+    """
+    Update or create AgentReport based on PremiumPayment updates
+    """
+    try:
+        # Check if policy holder has an assigned agent
+        if not instance.policy_holder.agent:
+            return
+
+        agent = instance.policy_holder.agent
+        
+        # Get or create agent report
+        report, created = AgentReport.objects.get_or_create(
+            agent=agent,
+            company=agent.company,
+            report_date=instance.next_payment_date,
+            defaults={
+                'policies_sold': 0,
+                'total_premium': Decimal('0.00'),
+                'commission_earned': Decimal('0.00'),
+            }
+        )
+
+        # Update report statistics
+        report.total_premium += instance.interval_payment
+        report.policies_sold = report.policies_sold + 1 if created else report.policies_sold
+        report.commission_earned += (instance.interval_payment * agent.commission_rate / 100)
+        report.save()
+
+    except Exception as e:
+        print(f"Error in update_agent_report signal: {str(e)}")
+
 @receiver(post_save, sender=AgentApplication)
-def agent_application_approval(sender, instance, **kwargs):
+def agent_application_approval(sender, instance, created, **kwargs):
     """
     Create SalesAgent when application is approved
     """
-    if instance.status == "Approved" and not hasattr(instance, 'sales_agent'):
-        SalesAgent.objects.create(
-            company=instance.company,
-            branch=instance.branch,
-            application=instance,
-            agent_code=f"A-{instance.company.id}-{instance.branch.id}-{str(instance.id).zfill(4)}",
-            commission_rate=5.00  # Default commission rate
-        )
+    try:
+        if instance.status == "Approved" and not hasattr(instance, 'sales_agent'):
+            agent_code = f"A-{instance.company.id}-{instance.branch.id}-{str(instance.id).zfill(4)}"
+            
+            SalesAgent.objects.create(
+                company=instance.company,
+                branch=instance.branch,
+                application=instance,
+                agent_code=agent_code,
+                commission_rate=Decimal('5.00')  # Default commission rate
+            )
+    except Exception as e:
+        print(f"Error in agent_application_approval signal: {str(e)}")
 
-# 6. PolicyHolder Cleanup Signal
-@receiver(pre_delete, sender=PolicyHolder)
-def cleanup_policy_holder_data(sender, instance, **kwargs):
+# Optional: Add signal to handle policy renewal
+@receiver(post_save, sender=PolicyHolder)
+def handle_policy_renewal(sender, instance, **kwargs):
     """
-    Clean up related data when a PolicyHolder is deleted
+    Handle policy renewal processes
+    - Triggered when policy status changes
+    - Creates renewal notices
+    - Updates related records
     """
-    Underwriting.objects.filter(policy_holder=instance).delete()
-    PremiumPayment.objects.filter(policy_holder=instance).delete()
+    try:
+        # Check if policy is near maturity (e.g., within 30 days)
+        if instance.maturity_date and instance.status == 'Active':
+            today = date.today()
+            days_to_maturity = (instance.maturity_date - today).days
+            
+            if 0 < days_to_maturity <= 30:
+                # You can add renewal notification logic here
+                pass
+                
+    except Exception as e:
+        print(f"Error in handle_policy_renewal signal: {str(e)}")
+        

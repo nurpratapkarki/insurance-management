@@ -2,13 +2,14 @@ from django.contrib import admin
 from django.db.models.signals import post_save
 from django.contrib.auth.models import User
 from django.contrib import messages
+from datetime import date
 from django.core.exceptions import ValidationError
 from django import forms
 
 from .models import (
     InsurancePolicy, SalesAgent, PolicyHolder, Underwriting,
     ClaimRequest, ClaimProcessing, PremiumPayment,MortalityRate,
-    EmployeePosition, Employee, PaymentProcessing, Branch, Company, AgentReport, AgentApplication, Occupation
+    EmployeePosition, Employee, PaymentProcessing, Branch, Company, AgentReport, AgentApplication, Occupation, DurationFactor
 )
 
 
@@ -60,10 +61,12 @@ class OccupationAdmin(admin.ModelAdmin):
     list_display = ('name', 'risk_category')
     list_filter = ('risk_category',)
     search_fields = ('name',)
+    
+    
 # Register Insurance Policy
 @admin.register(InsurancePolicy)
 class InsurancePolicyAdmin(admin.ModelAdmin):
-    list_display = ('name', 'company', 'min_sum_assured', 'max_sum_assured', 'quarterly_loading', 'semi_annual_loading')
+    list_display = ('name', 'company', 'min_sum_assured', 'max_sum_assured')
     search_fields = ('name', 'company__name')
     list_filter = ('company',)
 
@@ -72,6 +75,13 @@ class InsurancePolicyAdmin(admin.ModelAdmin):
         if request.user.is_superuser:
             return qs
         return qs.filter(company=request.user.company)
+    def save_model(self, request, obj, form, change):
+        if obj.policy_type == "Term" and obj.base_multiplier != 1.0:
+            messages.error(request, "Base multiplier for Term insurance must be 1.0.")
+            return  # Skip saving
+        super().save_model(request, obj, form, change)
+    
+    
 
 class AgentReportInline(admin.TabularInline):
     model = AgentReport
@@ -102,31 +112,31 @@ class SalesAgentAdmin(CompanyFilterMixin,admin.ModelAdmin):
             obj.agent_code = f"A-{obj.company.id}-{obj.branch.id}-{str(obj.application.id).zfill(4)}"
         super().save_model(request, obj, form, change)
         
-
 @admin.register(PolicyHolder)
 class PolicyHolderAdmin(admin.ModelAdmin):
-    list_display = ('first_name', 'last_name', 'status', 'policy', 'sum_assured', 'payment_interval', 'occupation')
+    list_display = ('first_name', 'last_name', 'status', 'policy', 'sum_assured', 
+                   'payment_interval', 'occupation', 'maturity_date')
     search_fields = ('first_name', 'last_name', 'policy__name')
     list_filter = ('status', 'policy', 'occupation')
-
-    # Fieldsets for organizing data
+    
     fieldsets = (
         ("Personal Information", {
             'fields': (
-                'first_name', 'middle_name', 'last_name', 'gender', 'date_of_birth', 
-                'phone_number',  'emergency_contact_name', 
-                'emergency_contact_number', 'occupation', 'yearly_income','status'
+                'first_name', 'middle_name', 'last_name', 'gender', 'date_of_birth',
+                'phone_number', 'emergency_contact_name', 'emergency_contact_number', 
+                'occupation', 'yearly_income', 'status', 'start_date'
             )
         }),
         ("Document Details", {
             'fields': (
-                'document_type', 'document_number', 'document_front', 'document_back', 
-                'pp_photo', 'pan_Number', 'pan_front', 'pan_back', 'assets_details'
+                'document_type', 'document_number', 'document_front', 'document_back',
+                'pp_photo', 'pan_number', 'pan_front', 'pan_back', 'assets_details'
             )
         }),
         ("Address & Geographic Details", {
             'fields': (
-                'provience', 'district', 'municipality', 'ward', 'nearest_hospital', 'natural_hazard_exposure'
+                'province', 'district', 'municipality', 'ward', 'nearest_hospital', 
+                'natural_hazard_exposure'
             )
         }),
         ("Policy Details", {
@@ -138,47 +148,58 @@ class PolicyHolderAdmin(admin.ModelAdmin):
         }),
         ("Nominee Details", {
             'fields': (
-                'nominee_name', 'nominee_relation', 'nominee_document_type', 
-                'nominee_document_number', 'nominee_document_front', 
+                'nominee_name', 'nominee_relation', 'nominee_document_type',
+                'nominee_document_number', 'nominee_document_front',
                 'nominee_document_back', 'nominee_pp_photo'
             )
         }),
         ("Habits & Health Details", {
             'fields': (
-                'heath_history', 'habits', 'dietary_habits', 'work_environment_risk','alcholic', 'smoker','past_medical_report','recent_medical_reports'
+                'health_history', 'habits', 'dietary_habits', 'work_environment_risk',
+                'alcoholic', 'smoker', 'past_medical_report', 'recent_medical_reports'
             )
         }),
     )
 
-    # Inline editing for related models if necessary
-    inlines = []  # Include related inlines if required.
-
-
-def save_model(self, request, obj, form, change):
-    # Save the PolicyHolder instance first
-    super().save_model(request, obj, form, change)
-
-    # Perform related operations after the PolicyHolder instance is saved
-    if obj.status == "approved":  # Assuming "approved" triggers underwriting
-        # Create or update underwriting
-        underwriting, created = Underwriting.objects.get_or_create(policy_holder=obj)
-
-        # Update premium payments
-        PremiumPayment.objects.filter(policy_holder=obj).delete()  # Clear existing payments
-        premium_payment = PremiumPayment(policy_holder=obj)
-        premium_payment.save()  # Automatically triggers the premium calculation logic
-
-        super().save_model(request, obj, form, change)
     def get_queryset(self, request):
-        """
-        Filter queryset based on the user's company if not a superuser.
-        """
+        """Filter queryset based on user's company access"""
         qs = super().get_queryset(request)
-        if request.user.is_superuser:
-            return qs
-        return qs.filter(company=request.user.company)
+        if not request.user.is_superuser:
+            return qs.filter(company=request.user.company)
+        return qs
 
-    
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        """Filter foreign key choices based on user's company"""
+        if db_field.name == "policy" and not request.user.is_superuser:
+            kwargs["queryset"] = InsurancePolicy.objects.filter(
+                company=request.user.company
+            )
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def save_model(self, request, obj, form, change):
+        """Handle PolicyHolder save"""
+        try:
+            # Set company from user if not set
+            if not obj.company and not request.user.is_superuser:
+                obj.company = request.user.company
+
+            # Validate required fields for new policy holders
+            if not change:
+                if not obj.sum_assured:
+                    form.add_error('sum_assured', 'Sum assured is required.')
+                    return
+                if not obj.policy:
+                    form.add_error('policy', 'Insurance policy is required.')
+                    return
+
+            # Save the object - validation will happen in model's save method
+            obj.save()
+
+        except ValidationError as e:
+            form._errors.update(e.message_dict)
+            messages.error(request, "Validation error occurred while saving the PolicyHolder.")
+
+             
 # Register Underwriting
 @admin.register(Underwriting)
 class UnderwritingAdmin(admin.ModelAdmin):
@@ -237,18 +258,45 @@ class PremiumPaymentForm(forms.ModelForm):
             )
             self.fields['policy_holder'].to_field_name = 'policy_number'  # Use policy_number as the value
 
+
+# Register Duration Factor
+@admin.register(DurationFactor)
+class DurationFactorAdmin(admin.ModelAdmin):
+    list_display = ('company', 'policy_type', 'min_duration', 'max_duration', 'factor')
+    list_filter = ('company', 'policy_type')
+    search_fields = ('company__name',)
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if not request.user.is_superuser:
+            return qs.filter(company=request.user.company)
+        return qs
 # Register Premium Payment
+
 @admin.register(PremiumPayment)
 class PremiumPaymentAdmin(admin.ModelAdmin):
-    list_display = ('policy_holder', 'annual_premium', 'interval_payment', 'total_paid')
-    readonly_fields = ('annual_premium', 'interval_payment')
+    list_display = ('policy_holder', 'annual_premium','total_premium', 'interval_payment', 
+                   'total_paid', 'payment_status', 'next_payment_date')
+    list_filter = ('payment_status', 'policy_holder__payment_interval')
+    search_fields = ('policy_holder__first_name', 'policy_holder__last_name', 'policy_holder__policy_number')
+    readonly_fields = ('annual_premium', 'interval_payment', 'total_premium', 'remaining_premium')
+    
+    actions = ['add_payment']
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if not request.user.is_superuser:
+            return qs.filter(policy_holder__company=request.user.company)
+        return qs
 
     def get_form(self, request, obj=None, **kwargs):
+        """Initialize form with calculated premium values"""
         form = super().get_form(request, obj, **kwargs)
         if not obj and 'policy_holder' in request.GET:
-            policy_holder_id = request.GET.get('policy_holder')
             try:
-                policy_holder = PolicyHolder.objects.get(id=policy_holder_id)
+                policy_holder = PolicyHolder.objects.get(
+                    id=request.GET.get('policy_holder')
+                )
                 payment = PremiumPayment(policy_holder=policy_holder)
                 annual_premium, interval_payment = payment.calculate_premium()
                 form.base_fields['annual_premium'].initial = annual_premium
@@ -256,30 +304,29 @@ class PremiumPaymentAdmin(admin.ModelAdmin):
             except PolicyHolder.DoesNotExist:
                 pass
         return form
-    def save_model(self, request, obj, form, change):
-        obj.amount = obj.calculate_premium()
-        super().save_model(request, obj, form, change)
 
     def add_payment(self, request, queryset):
-        """
-        Custom admin action to update payment status and total paid.
-        """
+        """Admin action to record payments"""
         for payment in queryset:
-            payment.total_paid += payment.amount  # Increment total_paid by interval amount
+            payment.add_payment(payment.interval_payment)
+        self.message_user(request, "Payments recorded successfully")
+    add_payment.short_description = "Record payment for selected items"
 
-            # Update payment status
-            if payment.total_paid >= payment.annual_premium:
-                payment.status = "Paid"
-            else:
-                payment.status = "Partially Paid"
-
-            payment.save()
-
-        # Notify admin
-        self.message_user(request, "Payments updated successfully.", level="success")
-    add_payment.short_description = "Mark selected payments as received"
-
-
+    def save_model(self, request, obj, form, change):
+        try:
+            if obj.paid_amount < 0:
+                raise ValidationError("Paid amount cannot be negative")
+                
+            super().save_model(request, obj, form, change)
+            
+            if obj.paid_amount > 0:
+                self.message_user(
+                    request,
+                    f"Payment of {obj.paid_amount} recorded successfully. Total paid: {obj.total_paid}",
+                    messages.SUCCESS
+                )
+        except ValidationError as e:
+            self.message_user(request, str(e), messages.ERROR)
 
 
             
