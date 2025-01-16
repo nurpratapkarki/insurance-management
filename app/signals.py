@@ -189,3 +189,14 @@ def handle_policy_renewal(sender, instance, **kwargs):
     except Exception as e:
         print(f"Error in handle_policy_renewal signal: {str(e)}")
         
+@receiver(post_save, sender=PolicyHolder)
+def trigger_bonus_on_anniversary(sender, instance, **kwargs):
+    """Trigger bonus calculation on policyholder's anniversary."""
+    today = date.today()
+    if instance.start_date.month == today.month and instance.start_date.day == today.day:
+        # Create a bonus record for the policyholder
+        Bonus.objects.create(
+            policy_holder=instance,
+            bonus_type='SI',  # Assuming Simple Interest as default
+            start_date=today
+        )

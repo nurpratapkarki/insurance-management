@@ -5,6 +5,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.core.exceptions import ValidationError
 from django.db.models.signals import post_save
 from django.utils.timezone import now
+from django.db.models import Sum
 from django.dispatch import receiver
 from .constants import (
     GENDER_CHOICES,
@@ -122,6 +123,55 @@ class InsurancePolicy(models.Model):
         super().clean()
         if self.policy_type == "Term" and self.base_multiplier != 1.0:
             raise ValidationError("Base multiplier for Term insurance must always be 1.0.")
+#Guranteed Surrender Value
+class GSVRate(models.Model):
+    policy = models.ForeignKey('InsurancePolicy', on_delete=models.CASCADE, related_name='gsv_rates')
+    min_year = models.PositiveIntegerField(help_text="Minimum year of the range.")
+    max_year = models.PositiveIntegerField(help_text="Maximum year of the range.")
+    rate = models.DecimalField(max_digits=5, decimal_places=2, help_text="GSV rate as a percentage.")
+
+    def clean(self):
+        """Ensure the year range is valid and does not overlap with other GSV ranges."""
+        if self.min_year >= self.max_year:
+            raise ValidationError("Minimum year must be less than maximum year.")
+
+        overlapping = GSVRate.objects.filter(
+            policy=self.policy,
+            min_year__lte=self.max_year,
+            max_year__gte=self.min_year
+        ).exclude(pk=self.pk)  # Exclude the current instance
+
+        if overlapping.exists():
+            raise ValidationError("GSV year ranges cannot overlap for the same policy.")
+
+    def __str__(self):
+        return f"GSV Rate {self.rate}% for {self.min_year}-{self.max_year} years"
+
+# SSv Factor
+class SSVConfig(models.Model):
+    policy = models.ForeignKey('InsurancePolicy', on_delete=models.CASCADE, related_name='ssv_configs')
+    min_year = models.PositiveIntegerField(help_text="Minimum year of the range.")
+    max_year = models.PositiveIntegerField(help_text="Maximum year of the range.")
+    ssv_factor = models.DecimalField(max_digits=5, decimal_places=2, help_text="SSV factor as a percentage.")
+    eligibility_years = models.PositiveIntegerField(default=5, help_text="Years of premium payment required for SSV eligibility.")
+    custom_condition = models.TextField(blank=True, help_text="Optional custom condition for SSV.")
+
+    def clean(self):
+        """Ensure the year range is valid and does not overlap with other SSV ranges."""
+        if self.min_year >= self.max_year:
+            raise ValidationError("Minimum year must be less than maximum year.")
+
+        overlapping = SSVConfig.objects.filter(
+            policy=self.policy,
+            min_year__lte=self.max_year,
+            max_year__gte=self.min_year
+        ).exclude(pk=self.pk)  # Exclude the current instance
+
+        if overlapping.exists():
+            raise ValidationError("SSV year ranges cannot overlap for the same policy.")
+
+    def __str__(self):
+        return f"SSV Factor {self.ssv_factor}% for {self.min_year}-{self.max_year} years"
 
 
 #  Agent Application
@@ -476,7 +526,50 @@ class PolicyHolder(models.Model):
             models.Index(fields=['policy']),
         ]        
 #policy holders end
+# Bonus Rate model
+class BonusRate(models.Model):
+    year = models.PositiveIntegerField(unique=True, help_text="Year the bonus rate applies to.")
+    bonus_rate = models.DecimalField(max_digits=5, decimal_places=2, help_text="Bonus rate as a percentage.")
 
+    def __str__(self):
+        return f"Bonus Rate for {self.year}: {self.bonus_rate}%"
+
+    class Meta:
+        ordering = ['-year']
+
+#Bonus Model
+class Bonus(models.Model):
+    policy_holder = models.ForeignKey(PolicyHolder, on_delete=models.CASCADE, related_name='bonuses')
+    bonus_type = models.CharField(
+        max_length=20,
+        choices=[('SI', 'Simple Interest'), ('CI', 'Compound Interest')],
+        default='SI'
+    )
+    accrued_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
+    start_date = models.DateField(help_text="Start date for bonus accrual.")
+    last_updated = models.DateField(auto_now=True)
+
+    def calculate_bonus(self):
+        """Calculate bonus based on the current year's rate and interest type."""
+        try:
+            current_rate = BonusRate.objects.get(year=date.today().year).bonus_rate
+        except BonusRate.DoesNotExist:
+            raise ValueError("No bonus rate defined for the current year.")
+
+        duration_years = (date.today() - self.start_date).days // 365
+        if self.bonus_type == 'SI':
+            return self.policy_holder.sum_assured * (current_rate / 100) * duration_years
+        elif self.bonus_type == 'CI':
+            principal = self.policy_holder.sum_assured
+            return principal * ((1 + (current_rate / 100)) ** duration_years - 1)
+
+    def save(self, *args, **kwargs):
+        """Recalculate and save accrued bonus."""
+        self.accrued_amount = self.calculate_bonus()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Bonus {self.bonus_type} for {self.policy_holder.first_name} {self.policy_holder.last_name}"
 
 
 # claim requestes
@@ -647,6 +740,8 @@ class PremiumPayment(models.Model):
     fine_due = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_premium = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
     remaining_premium = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
+    gsv_value = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
+    ssv_value = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
     payment_status = models.CharField(max_length=255, choices=PAYMENT_CHOICES, default='Unpaid')
     
     def calculate_premium(self):
@@ -660,7 +755,7 @@ class PremiumPayment(models.Model):
 
         # Get mortality rate
         mortality_rate = self.get_mortality_rate()
-        base_premium = (sum_assured * Decimal(mortality_rate)) / Decimal(1000)
+        base_premium = (sum_assured * Decimal(mortality_rate)) / Decimal(100)
 
         # Get company-specific duration factor
         duration_factor = self.get_duration_factor()
@@ -727,6 +822,55 @@ class PremiumPayment(models.Model):
                 f"policy type {policy_type}, duration {duration_years} years. Using default factor."
             )
             return Decimal('1.0')  # Default factor if no range defined
+    
+    def calculate_gsv(self):
+        """Calculate GSV based on the applicable GSV rate, excluding the first year's premium."""
+        duration_years = (date.today() - self.policy_holder.start_date).days // 365
+
+    # Get the applicable GSV rate for the policy
+        applicable_rate = self.policy_holder.policy.gsv_rates.filter(
+            min_year__lte=duration_years, max_year__gte=duration_years
+        ).first()
+
+        if not applicable_rate:
+            return Decimal(0)  # No GSV rate defined for the current duration
+
+        # Exclude the first year's premium from the calculation
+        first_year_premium = self.annual_premium
+        adjusted_total_paid = max(self.total_paid - first_year_premium, Decimal(0))
+
+    # Calculate GSV using the adjusted total paid
+        gsv = adjusted_total_paid * applicable_rate.rate / 100
+        return gsv.quantize(Decimal('1.00'))
+
+
+    def calculate_ssv(self):
+        """Calculate SSV based on policy duration and bonuses."""
+        duration_years = (date.today() - self.policy_holder.start_date).days // 365
+        premiums_paid = self.policy_holder.premium_payments.count()
+    
+        # Get applicable SSV configuration
+        applicable_range = self.policy_holder.policy.ssv_configs.filter(
+            min_year__lte=duration_years, 
+            max_year__gte=duration_years
+        ).first()
+    
+        if not applicable_range or premiums_paid < applicable_range.eligibility_years:
+            return Decimal(0)
+    
+        # Get total bonuses
+        total_bonuses = self.policy_holder.bonuses.aggregate(
+            total=Sum('accrued_amount'))['total'] or Decimal(0)
+    
+        # Calculate Premium Component
+        # SSV factor is applied to total premiums paid
+        premium_component = self.total_paid * (applicable_range.ssv_factor / 100)
+    
+        # Add Bonus Component
+        # Usually 100% of accrued bonuses are added to SSV
+        ssv = premium_component + total_bonuses
+    
+        return ssv.quantize(Decimal('1.00'))
 
     def save(self, *args, **kwargs):
         if not self.pk:  # New instance
@@ -781,7 +925,9 @@ class PremiumPayment(models.Model):
                     month=((today.month - 1 + interval_months) % 12) + 1,
                     year=today.year + ((today.month - 1 + interval_months) // 12)
             )
-
+         # --- New GSV and SSV Calculations ---
+        self.gsv_value = self.calculate_gsv()
+        self.ssv_value = self.calculate_ssv()
         super().save(*args, **kwargs)
 
     def get_mortality_rate(self):

@@ -5,11 +5,12 @@ from django.contrib import messages
 from datetime import date
 from django.core.exceptions import ValidationError
 from django import forms
+from django.db.models import Sum
 
 from .models import (
     InsurancePolicy, SalesAgent, PolicyHolder, Underwriting,
     ClaimRequest, ClaimProcessing, PremiumPayment,MortalityRate,
-    EmployeePosition, Employee, PaymentProcessing, Branch, Company, AgentReport, AgentApplication, Occupation, DurationFactor
+    EmployeePosition, Employee, PaymentProcessing, Branch, Company, AgentReport, AgentApplication, Occupation, DurationFactor, GSVRate, SSVConfig, Bonus, BonusRate
 )
 
 
@@ -61,7 +62,15 @@ class OccupationAdmin(admin.ModelAdmin):
     list_display = ('name', 'risk_category')
     list_filter = ('risk_category',)
     search_fields = ('name',)
-    
+
+class GSVRateInline(admin.StackedInline):
+    model = GSVRate
+    extra = 0
+
+class SSVConfigInline(admin.StackedInline):
+    model = SSVConfig
+    extra = 0
+
     
 # Register Insurance Policy
 @admin.register(InsurancePolicy)
@@ -69,6 +78,7 @@ class InsurancePolicyAdmin(admin.ModelAdmin):
     list_display = ('name', 'company', 'min_sum_assured', 'max_sum_assured')
     search_fields = ('name', 'company__name')
     list_filter = ('company',)
+    inlines = [GSVRateInline, SSVConfigInline]
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -80,8 +90,21 @@ class InsurancePolicyAdmin(admin.ModelAdmin):
             messages.error(request, "Base multiplier for Term insurance must be 1.0.")
             return  # Skip saving
         super().save_model(request, obj, form, change)
-    
-    
+
+#Bonus Rate Admin
+@admin.register(BonusRate)
+class BonusRateAdmin(admin.ModelAdmin):
+    list_display = ('year', 'bonus_rate')
+    ordering = ['-year']
+    search_fields = ('year',)
+
+#Bonus admin
+@admin.register(Bonus)
+class BonusAdmin(admin.ModelAdmin):
+    list_display = ('policy_holder', 'bonus_type', 'accrued_amount', 'start_date', 'last_updated')
+    list_filter = ('bonus_type',)
+    search_fields = ('policy_holder__first_name', 'policy_holder__last_name')
+
 
 class AgentReportInline(admin.TabularInline):
     model = AgentReport
@@ -112,13 +135,27 @@ class SalesAgentAdmin(CompanyFilterMixin,admin.ModelAdmin):
             obj.agent_code = f"A-{obj.company.id}-{obj.branch.id}-{str(obj.application.id).zfill(4)}"
         super().save_model(request, obj, form, change)
         
+#Bonus inline for the policyholder
+class BonusInline(admin.TabularInline):
+    model = Bonus
+    extra = 0
+    readonly_fields = ('bonus_type', 'accrued_amount', 'start_date', 'last_updated', 'total_bonus_accrued')
+
+    def total_bonus_accrued(self, obj):
+        """Calculate the total bonus accrued for the policyholder."""
+        if obj:
+            total = Bonus.objects.filter(policy_holder=obj.policy_holder).aggregate(total=Sum('accrued_amount'))['total']
+            return total or Decimal('0.00')
+        return Decimal('0.00')
+
+    total_bonus_accrued.short_description = 'Total Bonus Accrued'  # Label for the column
 @admin.register(PolicyHolder)
 class PolicyHolderAdmin(admin.ModelAdmin):
     list_display = ('first_name', 'last_name', 'status', 'policy', 'sum_assured', 
                    'payment_interval', 'occupation', 'maturity_date')
     search_fields = ('first_name', 'last_name', 'policy__name')
     list_filter = ('status', 'policy', 'occupation')
-    
+    inlines = [BonusInline]
     fieldsets = (
         ("Personal Information", {
             'fields': (
@@ -275,11 +312,16 @@ class DurationFactorAdmin(admin.ModelAdmin):
 
 @admin.register(PremiumPayment)
 class PremiumPaymentAdmin(admin.ModelAdmin):
-    list_display = ('policy_holder', 'annual_premium','total_premium', 'interval_payment', 
-                   'total_paid', 'payment_status', 'next_payment_date')
+    list_display = (
+        'policy_holder', 'annual_premium', 'total_premium', 'interval_payment',
+        'total_paid', 'payment_status', 'next_payment_date'
+    )
     list_filter = ('payment_status', 'policy_holder__payment_interval')
     search_fields = ('policy_holder__first_name', 'policy_holder__last_name', 'policy_holder__policy_number')
-    readonly_fields = ('annual_premium', 'interval_payment', 'total_premium', 'remaining_premium')
+    readonly_fields = (
+        'annual_premium', 'interval_payment', 'total_premium',
+        'remaining_premium','total_paid' , 'gsv_value', 'ssv_value'
+    )
     
     actions = ['add_payment']
 
