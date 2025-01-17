@@ -10,7 +10,7 @@ from django.db.models import Sum
 from .models import (
     InsurancePolicy, SalesAgent, PolicyHolder, Underwriting,
     ClaimRequest, ClaimProcessing, PremiumPayment,MortalityRate,
-    EmployeePosition, Employee, PaymentProcessing, Branch, Company, AgentReport, AgentApplication, Occupation, DurationFactor, GSVRate, SSVConfig, Bonus, BonusRate
+    EmployeePosition, Employee, PaymentProcessing, Branch, Company, AgentReport, AgentApplication, Occupation, DurationFactor, GSVRate, SSVConfig, Bonus, BonusRate, Loan, LoanRepayment
 )
 
 
@@ -252,12 +252,11 @@ class UnderwritingAdmin(admin.ModelAdmin):
 
 # Register Claim Request
 @admin.register(ClaimRequest)
-class ClaimRequestAdmin(CompanyFilterMixin , admin.ModelAdmin):
-    list_display = ('id', 'policy_holder', 'claim_date', 'status')
+class ClaimRequestAdmin(admin.ModelAdmin):
+    list_display = ('policy_holder', 'claim_date', 'status', 'claim_amount')
+    readonly_fields = ('claim_amount',)
     search_fields = ('policy_holder__first_name', 'policy_holder__last_name')
-    list_filter = ('status', 'claim_date')
-    ordering = ('-claim_date',)
-    list_per_page = 25
+
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -269,11 +268,9 @@ class ClaimRequestAdmin(CompanyFilterMixin , admin.ModelAdmin):
 # Register Claim Processing
 @admin.register(ClaimProcessing)
 class ClaimProcessingAdmin(admin.ModelAdmin):
-    list_display = ('id', 'claim_request', 'processing_status', 'processing_date')
-    list_filter = ('processing_status', 'processing_date')
+    list_display = ('claim_request', 'processing_status', 'processing_date')
     search_fields = ('claim_request__policy_holder__first_name', 'claim_request__policy_holder__last_name')
-    ordering = ('-processing_date',)
-
+    
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         if request.user.is_superuser:
@@ -399,11 +396,9 @@ class EmployeeAdmin(CompanyFilterMixin,admin.ModelAdmin):
 
 # Register Payment Processing
 @admin.register(PaymentProcessing)
-class PaymentProcessingAdmin( CompanyFilterMixin,admin.ModelAdmin):
-    list_display = ('id', 'name', 'processing_status', 'claim_request', 'date_of_processing')
-    list_filter = ('processing_status', 'date_of_processing')
-    search_fields = ('name', 'claim_request__policy_holder__first_name', 'claim_request__policy_holder__last_name')
-    ordering = ('-date_of_processing',)
+class PaymentProcessingAdmin(admin.ModelAdmin):
+    list_display = ('name', 'processing_status', 'date_of_processing')
+    search_fields = ('name', 'claim_request__policy_holder__first_name')
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -464,3 +459,16 @@ class MortalityRateAdmin(admin.ModelAdmin):
     list_display = ('company', 'age_group_start', 'age_group_end', 'rate')
     list_filter = ('company',)
     search_fields = ('company__name',)
+
+
+#Loan Admin
+@admin.register(Loan)
+class LoanAdmin(admin.ModelAdmin):
+    list_display = ('policy_holder', 'loan_amount', 'remaining_balance', 'accrued_interest', 'loan_status', 'created_at')
+    readonly_fields = ('remaining_balance', 'accrued_interest', 'last_interest_date')
+    search_fields = ('policy_holder__first_name', 'policy_holder__last_name')
+#Loan Repayment Admin
+@admin.register(LoanRepayment)
+class LoanRepaymentAdmin(admin.ModelAdmin):
+    list_display = ('loan', 'amount', 'repayment_type', 'repayment_date', 'remaining_loan_balance')
+    readonly_fields = ('remaining_loan_balance',)

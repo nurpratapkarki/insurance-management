@@ -11,7 +11,12 @@ from .models import (
     InsurancePolicy, 
     AgentReport, 
     AgentApplication, 
-    SalesAgent
+    SalesAgent,
+    Loan,
+    LoanRepayment,
+    ClaimProcessing,
+    ClaimRequest,
+    PaymentProcessing
 )
 
 @receiver(post_save, sender=PolicyHolder)
@@ -199,4 +204,31 @@ def trigger_bonus_on_anniversary(sender, instance, **kwargs):
             policy_holder=instance,
             bonus_type='SI',  # Assuming Simple Interest as default
             start_date=today
+        )
+
+
+@receiver(post_save, sender=Loan)
+def accrue_interest_on_loan_save(sender, instance, **kwargs):
+    """Automatically accrue interest when a loan is saved."""
+    instance.accrue_interest()
+
+@receiver(post_save, sender=LoanRepayment)
+def reset_interest_on_repayment(sender, instance, **kwargs):
+    """Reset interest accrual after a repayment is processed."""
+    instance.loan.accrue_interest()
+
+#Trigger Claim Processing wheneve the claim request is created
+@receiver(post_save, sender=ClaimRequest)
+def create_claim_processing(sender, instance, created, **kwargs):
+    if created:
+        ClaimProcessing.objects.create(
+            company=instance.company,
+            claim_request=instance
+        )
+# automatically mark the paid onece the payment  is approved
+@receiver(post_save, sender=ClaimProcessing)
+def auto_finalize_payment(sender, instance, **kwargs):
+    if instance.processing_status == 'Approved':
+        PaymentProcessing.objects.filter(claim_request=instance.claim_request).update(
+            processing_status='Completed'
         )

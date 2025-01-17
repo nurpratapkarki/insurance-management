@@ -574,58 +574,89 @@ class Bonus(models.Model):
 
 # claim requestes
 
-
 class ClaimRequest(models.Model):
-
-    id = models.BigAutoField(primary_key=True)
     company = models.ForeignKey(
-        Company,  on_delete=models.CASCADE, related_name='claim_requests', default=1)
+        Company, on_delete=models.CASCADE, related_name='claim_requests', default=1
+    )
     policy_holder = models.ForeignKey(
-        'PolicyHolder', related_name='claim_requests', on_delete=models.CASCADE, null=True, blank=True
+        PolicyHolder, on_delete=models.CASCADE, related_name='claim_requests'
     )
     claim_date = models.DateField(auto_now_add=True)
     status = models.CharField(
-        max_length=50, choices=STATUS_CHOICES, default="Pending")
-    bill = models.ImageField(
-        upload_to='claim_processing', null=True, blank=True)
-    policy_copy = models.ImageField(
-        upload_to='claim_processing', default=False)
-    health_report = models.ImageField(
-        upload_to='claim_processing', default=False)
-    reason = models.CharField(
-        max_length=50, choices=REASON_CHOICES, default='Others')
+        max_length=50,
+        choices=[('Pending', 'Pending'), ('Approved', 'Approved'), ('Rejected', 'Rejected')],
+        default='Pending'
+    )
+    bill = models.ImageField(upload_to='claim_processing', null=True, blank=True)
+    policy_copy = models.ImageField(upload_to='claim_processing', null=True, blank=True)
+    health_report = models.ImageField(upload_to='claim_processing', null=True, blank=True)
+    reason = models.CharField(max_length=50, choices=REASON_CHOICES, default='Others')
     other_reason = models.CharField(max_length=500, null=True, blank=True)
-    claim_amount = models.DecimalField(
-        max_digits=10, decimal_places=2, default=500.00)
+    claim_amount = models.DecimalField(max_digits=12, decimal_places=2, editable=False)
+
+    def calculate_claim_amount(self):
+        """Calculate the claimable amount."""
+        sum_assured = self.policy_holder.sum_assured or Decimal(0)
+        outstanding_loans = self.policy_holder.loans.filter(loan_status='Active').aggregate(
+            total=Sum('remaining_balance')
+        )['total'] or Decimal(0)
+        return max(sum_assured - outstanding_loans, Decimal(0))
+
+    def save(self, *args, **kwargs):
+        """Auto-calculate claim amount before saving."""
+        self.claim_amount = self.calculate_claim_amount()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Claim {self.id} - {self.policy_holder}"
 
     class Meta:
-        verbose_name = 'Claim Request'
-        verbose_name_plural = 'Claim Requests'
+        verbose_name = "Claim Request"
+        verbose_name_plural = "Claim Requests"
 
 
 # Claim Processing
 class ClaimProcessing(models.Model):
-    id = models.BigAutoField(primary_key=True)
     company = models.ForeignKey(
-        Company,  on_delete=models.CASCADE, related_name='claim_processings', default=1)
-
-    claim_request = models.ForeignKey(
-        ClaimRequest, related_name='claim_processings', on_delete=models.CASCADE, null=True, blank=True
+        Company, on_delete=models.CASCADE, related_name='claim_processings', default=1
+    )
+    claim_request = models.OneToOneField(
+        ClaimRequest, on_delete=models.CASCADE, related_name='processing'
     )
     processing_status = models.CharField(
-        max_length=50, choices=[("In Progress", "In Progress"), ("Completed", "Completed")]
+        max_length=50,
+        choices=[('In Progress', 'In Progress'), ('Approved', 'Approved'), ('Rejected', 'Rejected')],
+        default='In Progress'
     )
+    remarks = models.TextField(null=True, blank=True)
     processing_date = models.DateField(auto_now=True)
+
+    def finalize_claim(self):
+        """Finalize claim based on approval."""
+        if self.processing_status == 'Approved':
+            PaymentProcessing.objects.create(
+                company=self.company,
+                name=f"Claim Settlement - {self.claim_request.policy_holder}",
+                claim_request=self.claim_request,
+                processing_status='Completed',
+            )
+            self.claim_request.status = 'Approved'
+        elif self.processing_status == 'Rejected':
+            self.claim_request.status = 'Rejected'
+
+        self.claim_request.save()
+
+    def save(self, *args, **kwargs):
+        """Finalize claim on save."""
+        super().save(*args, **kwargs)
+        self.finalize_claim()
 
     def __str__(self):
         return f"Processing {self.id} - {self.processing_status}"
 
     class Meta:
-        verbose_name = 'Claim Processing'
-        verbose_name_plural = 'Claim Processings'
+        verbose_name = "Claim Processing"
+        verbose_name_plural = "Claim Processings"
 
 # Employee and Roles
 class EmployeePosition(models.Model):
@@ -664,16 +695,17 @@ class Employee(models.Model):
 
 # Payment Processing
 class PaymentProcessing(models.Model):
-    id = models.BigAutoField(primary_key=True)
     company = models.ForeignKey(
-        Company,  on_delete=models.CASCADE, related_name='payment_processings', default=1)
-
+        Company, on_delete=models.CASCADE, related_name='payment_processings', default=1
+    )
     name = models.CharField(max_length=200)
     processing_status = models.CharField(
-        max_length=50, choices=[("Pending", "Pending"), ("Completed", "Completed")], default="Pending"
+        max_length=50,
+        choices=[('Pending', 'Pending'), ('Completed', 'Completed')],
+        default='Pending'
     )
-    claim_request = models.ForeignKey(
-        ClaimRequest, on_delete=models.CASCADE, null=True, blank=True
+    claim_request = models.OneToOneField(
+        ClaimRequest, on_delete=models.CASCADE, related_name='payment', null=True, blank=True
     )
     date_of_processing = models.DateField(auto_now_add=True)
 
@@ -681,8 +713,8 @@ class PaymentProcessing(models.Model):
         return self.name
 
     class Meta:
-        verbose_name = 'Payment Processing'
-        verbose_name_plural = 'Payment Processings'
+        verbose_name = "Payment Processing"
+        verbose_name_plural = "Payment Processings"
 
 # Underwriting Process Or report
 class Underwriting(models.Model):
@@ -974,3 +1006,103 @@ class AgentReport(models.Model):
     class Meta:
         verbose_name = 'Agent Report'
         verbose_name_plural = 'Agent Reports'
+        
+#Loan System Here
+
+class Loan(models.Model):
+    policy_holder = models.ForeignKey('PolicyHolder', on_delete=models.CASCADE, related_name='loans')
+    loan_amount = models.DecimalField(max_digits=12, decimal_places=2, help_text="Principal loan amount.")
+    interest_rate = models.DecimalField(max_digits=5, decimal_places=2, default=10.00, help_text="Annual interest rate in percentage.")
+    remaining_balance = models.DecimalField(max_digits=12, decimal_places=2, editable=False, help_text="Remaining loan principal balance.", )
+    accrued_interest = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False, help_text="Interest accrued on the loan.")
+    loan_status = models.CharField(
+        max_length=50, 
+        choices=[('Active', 'Active'), ('Paid', 'Paid')],
+        default='Active'
+    )
+    last_interest_date = models.DateField(auto_now_add=True, help_text="Date when interest was last accrued.")
+    created_at = models.DateField(auto_now_add=True)
+    updated_at = models.DateField( auto_now_add=True)
+
+    def calculate_max_loan(self):
+        """Calculate the maximum loan amount as 90% of the GSV."""
+        gsv = self.policy_holder.premium_payments.first().gsv_value  # Use the latest GSV
+        return gsv * Decimal('0.90')
+
+    def accrue_interest(self):
+        """Accrue interest on the remaining balance."""
+        today = date.today()
+        if self.loan_status != 'Active':
+            return  # Skip loans that are already paid
+
+        # Calculate the number of days since the last interest accrual
+        days_since_last_accrual = (today - self.last_interest_date).days
+
+        if days_since_last_accrual <= 0:
+            return  # No accrual needed
+
+        # Calculate daily interest rate and interest for elapsed days
+        daily_rate = self.interest_rate / 100 / 365
+        interest = self.remaining_balance * Decimal(daily_rate) * Decimal(days_since_last_accrual)
+
+        # Update accrued interest and last accrual date
+        self.accrued_interest += interest.quantize(Decimal('1.00'))
+        self.last_interest_date = today
+        self.save()
+
+    def save(self, *args, **kwargs):
+        """Validate and initialize loan."""
+        if not self.pk:  # On loan creation
+            max_loan = self.calculate_max_loan()
+            if self.loan_amount > max_loan:
+                raise ValidationError(f"Loan amount exceeds the maximum allowed ({max_loan}).")
+            self.remaining_balance = self.loan_amount
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Loan for {self.policy_holder} - {self.loan_status}"
+
+#Loan Repayment Model
+class LoanRepayment(models.Model):
+    loan = models.ForeignKey(Loan, on_delete=models.CASCADE, related_name='repayments')
+    repayment_date = models.DateField(auto_now_add=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, help_text="Amount paid towards the loan.")
+    repayment_type = models.CharField(
+        max_length=50, 
+        choices=[('Principal', 'Principal'), ('Interest', 'Interest'), ('Both', 'Both')],
+        default='Both'
+    )
+    remaining_loan_balance = models.DecimalField(max_digits=12, decimal_places=2, editable=False, help_text="Remaining loan balance after this repayment.")
+
+    def process_repayment(self):
+        """Apply repayment to interest and/or principal."""
+        remaining = self.amount
+
+        if self.repayment_type in ('Both', 'Interest'):
+            # Deduct from accrued interest first
+            interest_payment = min(remaining, self.loan.accrued_interest)
+            self.loan.accrued_interest -= interest_payment
+            remaining -= interest_payment
+
+        if self.repayment_type in ('Both', 'Principal') and remaining > 0:
+            # Deduct from remaining balance
+            principal_payment = min(remaining, self.loan.remaining_balance)
+            self.loan.remaining_balance -= principal_payment
+
+        # Update loan status
+        if self.loan.remaining_balance <= 0 and self.loan.accrued_interest <= 0:
+            self.loan.loan_status = 'Paid'
+
+        # Save the updated loan
+        self.loan.save()
+
+        # Set the remaining loan balance for this repayment
+        self.remaining_loan_balance = self.loan.remaining_balance + self.loan.accrued_interest
+
+    def save(self, *args, **kwargs):
+        """Process repayment before saving."""
+        self.process_repayment()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Repayment for {self.loan} on {self.repayment_date}"
