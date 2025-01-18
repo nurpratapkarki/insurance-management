@@ -108,8 +108,6 @@ class UserProfile(models.Model):
 # Basic Information about Insurance Policies
 
 class InsurancePolicy(models.Model):
-    company = models.ForeignKey(
-        'Company', on_delete=models.CASCADE, related_name='insurance_policies', default=1)
     name = models.CharField(max_length=200)
     policy_type = models.CharField(max_length=50, choices=POLICY_TYPES, default='Term')
     base_multiplier = models.DecimalField(max_digits=5, decimal_places=2, default=1.0)
@@ -117,8 +115,6 @@ class InsurancePolicy(models.Model):
     max_sum_assured = models.DecimalField(max_digits=12, decimal_places=2, default=10000.00)
     adb_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)  # ADB charge %
     ptd_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)  # PTD charge %
-    include_adb = models.BooleanField(default=False)
-    include_ptd = models.BooleanField(default=False)
     description = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

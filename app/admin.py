@@ -28,21 +28,25 @@ class BranchFilterMixin:
         return qs
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        """
-        Dynamically filter foreign key fields for data isolation.
-        """
         if not request.user.is_superuser:
-            # Restrict branch data
+        # Handle branch filtering
             if db_field.name == "branch":
-                kwargs["queryset"] = Branch.objects.filter(id=request.user.profile.branch.id)
-            elif db_field.name == "company":
-                kwargs["queryset"] = Company.objects.filter(id=request.user.profile.company.id)
+                branch = getattr(request.user.profile, "branch", None)
+            if branch and branch.pk is not None:  # Check if branch is saved
+                kwargs["queryset"] = Branch.objects.filter(id=branch.id)
             else:
-                # Dynamically filter by branch if the related model has `branch` field
-                related_model = db_field.related_model
-                if hasattr(related_model, 'branch'):
-                    kwargs["queryset"] = related_model.objects.filter(branch=request.user.profile.branch)
+                kwargs["queryset"] = Branch.objects.none()  # Provide an empty queryset for unsaved instances
+
+        # Handle company filtering
+        elif db_field.name == "company":
+            company = getattr(request.user.profile, "company", None)
+            if company and company.pk is not None:  # Check if company is saved
+                kwargs["queryset"] = Company.objects.filter(id=company.id)
+            else:
+                kwargs["queryset"] = Company.objects.none()  # Provide an empty queryset for unsaved instances
+
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
 
 
 
@@ -54,11 +58,11 @@ class OccupationAdmin(admin.ModelAdmin):
     list_filter = ('risk_category',)
     search_fields = ('name',)
 
-class GSVRateInline(admin.StackedInline):
+class GSVRateInline(admin.TabularInline):
     model = GSVRate
     extra = 0
 
-class SSVConfigInline(admin.StackedInline):
+class SSVConfigInline(admin.TabularInline):
     model = SSVConfig
     extra = 0
 
@@ -66,16 +70,38 @@ class SSVConfigInline(admin.StackedInline):
 # Register Insurance Policy
 @admin.register(InsurancePolicy)
 class InsurancePolicyAdmin(admin.ModelAdmin):
-    list_display = ('name', 'company', 'min_sum_assured', 'max_sum_assured')
-    search_fields = ('name', 'company__name')
-    list_filter = ('company',)
+    list_display = ('name', 'min_sum_assured', 'max_sum_assured')
+    search_fields = ('name', 'policy_type')
     inlines = [GSVRateInline, SSVConfigInline]
 
     def save_model(self, request, obj, form, change):
         if obj.policy_type == "Term" and obj.base_multiplier != 1.0:
             messages.error(request, "Base multiplier for Term insurance must be 1.0.")
             return  # Skip saving
+
+        # Save the policy to ensure it has a primary key
         super().save_model(request, obj, form, change)
+
+    def save_related(self, request, form, formsets, change):
+        """
+        Override save_related to ensure the policy is saved 
+        before saving related objects (GSVRate, SSVConfig).
+        """
+        # Save the main object (InsurancePolicy)
+        if not form.instance.pk:
+            form.instance.save()
+        super().save_related(request, form, formsets, change)
+
+    def response_add(self, request, obj, post_url_continue=None):
+        """
+        Customize the response to guide the user after adding the policy.
+        """
+        if "_continue" in request.POST:
+            messages.info(
+                request, 
+                "Insurance Policy saved! You can now add GSV and SSV rates."
+            )
+        return super().response_add(request, obj, post_url_continue)
 
 #Bonus Rate Admin
 @admin.register(BonusRate)
@@ -517,3 +543,4 @@ class CustomUserAdmin(BaseUserAdmin):
             if first_company:
                 obj.profile.company = first_company
                 obj.profile.save()
+    
