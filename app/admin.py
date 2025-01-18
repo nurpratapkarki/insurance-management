@@ -6,55 +6,46 @@ from datetime import date
 from django.core.exceptions import ValidationError
 from django import forms
 from django.db.models import Sum
-
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import (
     InsurancePolicy, SalesAgent, PolicyHolder, Underwriting,
     ClaimRequest, ClaimProcessing, PremiumPayment,MortalityRate,
-    EmployeePosition, Employee, PaymentProcessing, Branch, Company, AgentReport, AgentApplication, Occupation, DurationFactor, GSVRate, SSVConfig, Bonus, BonusRate, Loan, LoanRepayment
+    EmployeePosition, Employee, PaymentProcessing, Branch, Company, AgentReport, AgentApplication, Occupation, DurationFactor, GSVRate, SSVConfig, Bonus, BonusRate, Loan, LoanRepayment,UserProfile
 )
 
 
-# Mixin for filtering 'company' and 'user' fields
-class CompanyFilterMixin:
-    def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        """
-        Dynamically filter foreign key fields to show only data relevant to the user's company.
-        """
-        if not request.user.is_superuser:
-            # Filter by company for fields that reference a company
-            if db_field.name == "company":
-                kwargs["queryset"] = db_field.related_model.objects.filter(id=request.user.company.id)
-            elif db_field.name == "user":
-                kwargs["queryset"] = db_field.related_model.objects.filter(id=request.user.id)
-            else:
-                # Filter relational fields dynamically if they have a 'company' field
-                try:
-                    related_model = db_field.related_model
-                    if hasattr(related_model, 'company'):
-                        kwargs["queryset"] = related_model.objects.filter(company=request.user.company)
-                except AttributeError:
-                    pass  # If no related model or company field exists, do nothing
-
-        return super().formfield_for_foreignkey(db_field, request, **kwargs)
-    
-# Register the Company
-@admin.register(Company)
-class CompanyAdmin(admin.ModelAdmin):
-    list_display = ('company_code', 'name', 'user', 'email', 'is_active', 'phone_number')
-    search_fields = ('name', 'address')
-    ordering = ('-id',)
-
+# Mixin for filtering 'Branch' and 'user' fields
+class BranchFilterMixin:
     def get_queryset(self, request):
+        """Filter queryset based on the user's branch and company."""
         qs = super().get_queryset(request)
         if request.user.is_superuser:
-            return qs
-        return qs.filter(user=request.user)  # Company is directly tied to the user
+            return qs  # Superusers see all data
+
+        # Restrict access to branch-specific data
+        if hasattr(self.model, 'branch'):
+            return qs.filter(branch=request.user.profile.branch)
+        return qs
+
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        if db_field.name == "user" and not request.user.is_superuser:
-            # Restrict to only the logged-in user for non-superusers
-            kwargs["queryset"] = User.objects.filter(id=request.user.id)
+        """
+        Dynamically filter foreign key fields for data isolation.
+        """
+        if not request.user.is_superuser:
+            # Restrict branch data
+            if db_field.name == "branch":
+                kwargs["queryset"] = Branch.objects.filter(id=request.user.profile.branch.id)
+            elif db_field.name == "company":
+                kwargs["queryset"] = Company.objects.filter(id=request.user.profile.company.id)
+            else:
+                # Dynamically filter by branch if the related model has `branch` field
+                related_model = db_field.related_model
+                if hasattr(related_model, 'branch'):
+                    kwargs["queryset"] = related_model.objects.filter(branch=request.user.profile.branch)
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
-    
+
+
+
 #Register occupation
 
 @admin.register(Occupation)
@@ -80,11 +71,6 @@ class InsurancePolicyAdmin(admin.ModelAdmin):
     list_filter = ('company',)
     inlines = [GSVRateInline, SSVConfigInline]
 
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        if request.user.is_superuser:
-            return qs
-        return qs.filter(company=request.user.company)
     def save_model(self, request, obj, form, change):
         if obj.policy_type == "Term" and obj.base_multiplier != 1.0:
             messages.error(request, "Base multiplier for Term insurance must be 1.0.")
@@ -115,7 +101,7 @@ class AgentReportInline(admin.TabularInline):
     verbose_name_plural = "Agent Reports"
 # Register Sales Agent
 @admin.register(SalesAgent)
-class SalesAgentAdmin(CompanyFilterMixin,admin.ModelAdmin):
+class SalesAgentAdmin(BranchFilterMixin,admin.ModelAdmin):
     list_display = ('id', 'agent_code', 'get_application_name', 'is_active', 'commission_rate', 'joining_date')
     search_fields = ('agent_code', 'application__first_name', 'application__last_name')
     list_filter = ('is_active',)
@@ -150,7 +136,7 @@ class BonusInline(admin.TabularInline):
 
     total_bonus_accrued.short_description = 'Total Bonus Accrued'  # Label for the column
 @admin.register(PolicyHolder)
-class PolicyHolderAdmin(admin.ModelAdmin):
+class PolicyHolderAdmin(admin.ModelAdmin, BranchFilterMixin):
     list_display = ('first_name', 'last_name', 'status', 'policy', 'sum_assured', 
                    'payment_interval', 'occupation', 'maturity_date')
     search_fields = ('first_name', 'last_name', 'policy__name')
@@ -202,7 +188,7 @@ class PolicyHolderAdmin(admin.ModelAdmin):
         """Filter queryset based on user's company access"""
         qs = super().get_queryset(request)
         if not request.user.is_superuser:
-            return qs.filter(company=request.user.company)
+            return qs.filter(branch=request.user.profile.branch)
         return qs
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
@@ -239,7 +225,7 @@ class PolicyHolderAdmin(admin.ModelAdmin):
              
 # Register Underwriting
 @admin.register(Underwriting)
-class UnderwritingAdmin(admin.ModelAdmin):
+class UnderwritingAdmin(admin.ModelAdmin, BranchFilterMixin):
     list_display = ('policy_holder', 'risk_assessment_score', 'risk_category', 'remarks')
     readonly_fields = ('risk_assessment_score', 'risk_category')
 
@@ -247,12 +233,12 @@ class UnderwritingAdmin(admin.ModelAdmin):
         qs = super().get_queryset(request)
         if request.user.is_superuser:
             return qs
-        return qs.filter(company=request.user.company)
+        return qs.filter(branch=request.user.profile.branch)
     
 
 # Register Claim Request
 @admin.register(ClaimRequest)
-class ClaimRequestAdmin(admin.ModelAdmin):
+class ClaimRequestAdmin(admin.ModelAdmin, BranchFilterMixin):
     list_display = ('policy_holder', 'claim_date', 'status', 'claim_amount')
     readonly_fields = ('claim_amount',)
     search_fields = ('policy_holder__first_name', 'policy_holder__last_name')
@@ -262,12 +248,12 @@ class ClaimRequestAdmin(admin.ModelAdmin):
         qs = super().get_queryset(request)
         if request.user.is_superuser:
             return qs
-        return qs.filter(company=request.user.company)
+        return qs.filter(branch=request.user.profile.branch)
 
 
 # Register Claim Processing
 @admin.register(ClaimProcessing)
-class ClaimProcessingAdmin(admin.ModelAdmin):
+class ClaimProcessingAdmin(admin.ModelAdmin, BranchFilterMixin):
     list_display = ('claim_request', 'processing_status', 'processing_date')
     search_fields = ('claim_request__policy_holder__first_name', 'claim_request__policy_holder__last_name')
     
@@ -275,7 +261,7 @@ class ClaimProcessingAdmin(admin.ModelAdmin):
         qs = super().get_queryset(request)
         if request.user.is_superuser:
             return qs
-        return qs.filter(company=request.user.company)
+        return qs.filter(branch=request.user.profile.branch)
 
 #Forms for the Premium Payment
 class PremiumPaymentForm(forms.ModelForm):
@@ -296,15 +282,11 @@ class PremiumPaymentForm(forms.ModelForm):
 # Register Duration Factor
 @admin.register(DurationFactor)
 class DurationFactorAdmin(admin.ModelAdmin):
-    list_display = ('company', 'policy_type', 'min_duration', 'max_duration', 'factor')
-    list_filter = ('company', 'policy_type')
+    list_display = ( 'policy_type', 'min_duration', 'max_duration', 'factor')
+    list_filter = ( 'policy_type', 'factor')
     search_fields = ('company__name',)
 
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        if not request.user.is_superuser:
-            return qs.filter(company=request.user.company)
-        return qs
+    
 # Register Premium Payment
 
 @admin.register(PremiumPayment)
@@ -325,7 +307,7 @@ class PremiumPaymentAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         if not request.user.is_superuser:
-            return qs.filter(policy_holder__company=request.user.company)
+            return qs.filter(policy_holder__branch=request.user.profile.branch)
         return qs
 
     def get_form(self, request, obj=None, **kwargs):
@@ -381,7 +363,7 @@ class EmployeePositionAdmin(admin.ModelAdmin):
 
 # Register Employee
 @admin.register(Employee)
-class EmployeeAdmin(CompanyFilterMixin,admin.ModelAdmin):
+class EmployeeAdmin(BranchFilterMixin,admin.ModelAdmin):
     list_display = ('id', 'name', 'address', 'gender', 'date_of_birth', 'employee_position')
     list_filter = ('gender', 'employee_position')
     search_fields = ('name', 'address')
@@ -391,12 +373,12 @@ class EmployeeAdmin(CompanyFilterMixin,admin.ModelAdmin):
         qs = super().get_queryset(request)
         if request.user.is_superuser:
             return qs
-        return qs.filter(company=request.user.company)
+        return qs.filter(branch=request.user.profile.branch)
 
 
 # Register Payment Processing
 @admin.register(PaymentProcessing)
-class PaymentProcessingAdmin(admin.ModelAdmin):
+class PaymentProcessingAdmin(admin.ModelAdmin, BranchFilterMixin):
     list_display = ('name', 'processing_status', 'date_of_processing')
     search_fields = ('name', 'claim_request__policy_holder__first_name')
 
@@ -404,24 +386,13 @@ class PaymentProcessingAdmin(admin.ModelAdmin):
         qs = super().get_queryset(request)
         if request.user.is_superuser:
             return qs
-        return qs.filter(company=request.user.company)
-
-
-# Register Branch
-@admin.register(Branch)
-class BranchAdmin(CompanyFilterMixin ,admin.ModelAdmin):
-    list_display = ('branch_code', 'name', 'location')
-    search_fields = ('name',)
-    ordering = ('-id',)
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        if request.user.is_superuser:
-            return qs
-        return qs.filter(company=request.user.company)
+        return qs.filter(branch=request.user.profile.branch)
     
-    # agent application
+#Branch admin registration
+
+# agent application
 @admin.register(AgentApplication)
-class AgentApplicationAdmin(CompanyFilterMixin,admin.ModelAdmin):
+class AgentApplicationAdmin(BranchFilterMixin,admin.ModelAdmin):
     list_display = (
         'id', 'first_name', 'last_name', 'company', 'branch',
         'email', 'phone_number', 'status', 'created_at'
@@ -463,12 +434,86 @@ class MortalityRateAdmin(admin.ModelAdmin):
 
 #Loan Admin
 @admin.register(Loan)
-class LoanAdmin(admin.ModelAdmin):
+class LoanAdmin(admin.ModelAdmin, BranchFilterMixin):
     list_display = ('policy_holder', 'loan_amount', 'remaining_balance', 'accrued_interest', 'loan_status', 'created_at')
     readonly_fields = ('remaining_balance', 'accrued_interest', 'last_interest_date')
     search_fields = ('policy_holder__first_name', 'policy_holder__last_name')
 #Loan Repayment Admin
 @admin.register(LoanRepayment)
-class LoanRepaymentAdmin(admin.ModelAdmin):
+class LoanRepaymentAdmin(admin.ModelAdmin, BranchFilterMixin):
     list_display = ('loan', 'amount', 'repayment_type', 'repayment_date', 'remaining_loan_balance')
     readonly_fields = ('remaining_loan_balance',)
+
+
+@admin.register(Company)
+class CompanyAdmin(admin.ModelAdmin):
+    list_display = ('name', 'company_code', 'email', 'is_active')
+    search_fields = ('name', 'company_code')
+    list_filter = ('is_active',)
+
+@admin.register(Branch)
+class BranchAdmin(admin.ModelAdmin):
+    list_display = ('name', 'branch_code', 'company', 'location')
+    search_fields = ('name', 'branch_code')
+    list_filter = ('company',)
+    readonly_fields = ('company',)
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if not request.user.is_superuser:
+            return qs.filter(company=request.user.profile.company)
+        return qs
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "company" and not request.user.is_superuser:
+            kwargs["queryset"] = Company.objects.filter(id=request.user.profile.company.id)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ('user', 'branch', 'company')
+    search_fields = ('user__username', 'branch__name', 'company__name')
+    list_filter = ('company', 'branch')
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if not request.user.is_superuser:
+            return qs.filter(company=request.user.profile.company)
+        return qs
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if not request.user.is_superuser:
+            if db_field.name == "branch":
+                kwargs["queryset"] = Branch.objects.filter(company=request.user.profile.company)
+            elif db_field.name == "company":
+                kwargs["queryset"] = Company.objects.filter(id=request.user.profile.company.id)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+# Unregister the default User admin and register custom one
+admin.site.unregister(User)
+
+@admin.register(User)
+class CustomUserAdmin(BaseUserAdmin):
+    list_display = ('username', 'email', 'is_superuser', 'get_branch', 'get_company')
+    search_fields = ('username', 'email')
+    list_filter = ('is_superuser', 'is_active')
+
+    def get_branch(self, obj):
+        return obj.profile.branch.name if obj.profile.branch else "Not Assigned"
+    
+    def get_company(self, obj):
+        return obj.profile.company.name if obj.profile.company else "Not Assigned"
+    
+    get_branch.short_description = 'Branch'
+    get_company.short_description = 'Company'
+
+    def save_model(self, request, obj, form, change):
+        creating = not obj.pk
+        super().save_model(request, obj, form, change)
+        
+        if creating and not obj.is_superuser:
+            # For new non-superuser, try to assign first company
+            first_company = Company.objects.first()
+            if first_company:
+                obj.profile.company = first_company
+                obj.profile.save()

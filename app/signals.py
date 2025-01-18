@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from decimal import Decimal
 from datetime import date
+from django.contrib.auth.models import User
 from .models import (
     PolicyHolder, 
     Underwriting, 
@@ -16,7 +17,10 @@ from .models import (
     LoanRepayment,
     ClaimProcessing,
     ClaimRequest,
-    PaymentProcessing
+    PaymentProcessing,
+    Branch,
+    Company,
+    UserProfile
 )
 
 @receiver(post_save, sender=PolicyHolder)
@@ -232,3 +236,18 @@ def auto_finalize_payment(sender, instance, **kwargs):
         PaymentProcessing.objects.filter(claim_request=instance.claim_request).update(
             processing_status='Completed'
         )
+
+# Signal to create UserProfile when User is created
+
+@receiver(post_save, sender=User)
+def create_or_update_user_profile(sender, instance, created, **kwargs):
+    """Create or update UserProfile when User is created/updated."""
+    if created:
+        UserProfile.objects.create(user=instance)
+        
+        # If non-superuser, try to assign first company
+        if not instance.is_superuser:
+            first_company = Company.objects.first()
+            if first_company:
+                instance.profile.company = first_company
+                instance.profile.save()

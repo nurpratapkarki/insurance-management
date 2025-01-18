@@ -48,12 +48,9 @@ class MortalityRate(models.Model):
 
     def __str__(self):
         return f"{self.age_group_start}-{self.age_group_end}: {self.rate}%"
-
 class Company(models.Model):
     id = models.BigAutoField(primary_key=True)
     name = models.CharField(max_length=255, unique=True)
-    user = models.OneToOneField(
-        User, on_delete=models.CASCADE, related_name='company')
     company_code = models.IntegerField(unique=True, default=1)
     address = models.CharField(max_length=255)
     logo = models.ImageField(upload_to='company', null=True, blank=True)
@@ -61,46 +58,58 @@ class Company(models.Model):
     is_active = models.BooleanField(default=True)
     phone_number = models.CharField(max_length=20)
 
+    class Meta:
+        verbose_name = 'Company'
+        verbose_name_plural = 'Companies'
+        indexes = [
+            models.Index(fields=['name']),
+        ]
+
     def __str__(self):
         return self.name
 
-        class Meta:
-            verbose_name = 'Company'
-            verbose_name_plural = 'Companies'
-            indexes = [
-                models.Index(fields=['name']),
-            ]
-
-
-# Branch Model
-
 class Branch(models.Model):
-    id = models.BigAutoField(primary_key=True)
     name = models.CharField(max_length=255)
     branch_code = models.IntegerField(unique=True, default=1)
     location = models.CharField(max_length=255, null=True, blank=True)
-    company = models.ForeignKey(
-        Company, on_delete=models.CASCADE, related_name='branches', default=1)
-    manager = models.OneToOneField(
-        User, on_delete=models.CASCADE, related_name='branch_manager', null=True, blank=True)
-
-    def __str__(self):
-        return self.name
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='branches', default=1)
 
     class Meta:
         verbose_name = 'Branch'
         verbose_name_plural = 'Branches'
-        indexes = [
-            models.Index(fields=['name']),
-            models.Index(fields=['company']),
-        ]
 
+    def __str__(self):
+        return f"{self.name} ({self.branch_code})"
+
+class UserProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    branch = models.ForeignKey(
+        Branch, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='employees'
+    )
+    company = models.ForeignKey(
+        Company, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True
+    )
+
+    def __str__(self):
+        return f"{self.user.username}'s Profile"
+
+    def save(self, *args, **kwargs):
+        if self.branch and not self.company:
+            self.company = self.branch.company
+        super().save(*args, **kwargs)
 
 # Basic Information about Insurance Policies
 
 class InsurancePolicy(models.Model):
     company = models.ForeignKey(
-        'Company', on_delete=models.CASCADE, related_name='insurance_policies')
+        'Company', on_delete=models.CASCADE, related_name='insurance_policies', default=1)
     name = models.CharField(max_length=200)
     policy_type = models.CharField(max_length=50, choices=POLICY_TYPES, default='Term')
     base_multiplier = models.DecimalField(max_digits=5, decimal_places=2, default=1.0)
@@ -289,14 +298,13 @@ class SalesAgent(models.Model):
         ]
 
 class DurationFactor(models.Model):
-    company = models.ForeignKey('Company', on_delete=models.CASCADE,)
     min_duration = models.PositiveIntegerField(help_text="Minimum duration in years")
     max_duration = models.PositiveIntegerField(help_text="Maximum duration in years")
     factor = models.DecimalField(max_digits=5, decimal_places=2)
     policy_type = models.CharField(max_length=50, choices=POLICY_TYPES)
     
     class Meta:
-        unique_together = ['company', 'min_duration', 'max_duration', 'policy_type']
+        unique_together = [ 'min_duration', 'max_duration', 'policy_type']
         ordering = ['min_duration']
 
     def clean(self):
@@ -575,8 +583,8 @@ class Bonus(models.Model):
 # claim requestes
 
 class ClaimRequest(models.Model):
-    company = models.ForeignKey(
-        Company, on_delete=models.CASCADE, related_name='claim_requests', default=1
+    branch = models.ForeignKey(
+        Branch, on_delete=models.CASCADE, related_name='claim_requests', default=1
     )
     policy_holder = models.ForeignKey(
         PolicyHolder, on_delete=models.CASCADE, related_name='claim_requests'
@@ -617,8 +625,8 @@ class ClaimRequest(models.Model):
 
 # Claim Processing
 class ClaimProcessing(models.Model):
-    company = models.ForeignKey(
-        Company, on_delete=models.CASCADE, related_name='claim_processings', default=1
+    branch = models.ForeignKey(
+        Branch, on_delete=models.CASCADE, related_name='claim_processings', default=1
     )
     claim_request = models.OneToOneField(
         ClaimRequest, on_delete=models.CASCADE, related_name='processing'
@@ -673,8 +681,6 @@ class EmployeePosition(models.Model):
 
 class Employee(models.Model):
     id = models.BigAutoField(primary_key=True)
-    company = models.ForeignKey(
-        Company,  on_delete=models.CASCADE, related_name='employees', default=1)
     branch = models.ForeignKey(
         Branch, on_delete=models.CASCADE, null=True, blank=True)
     name = models.CharField(max_length=50)
@@ -695,8 +701,8 @@ class Employee(models.Model):
 
 # Payment Processing
 class PaymentProcessing(models.Model):
-    company = models.ForeignKey(
-        Company, on_delete=models.CASCADE, related_name='payment_processings', default=1
+    branch = models.ForeignKey(
+        Branch, on_delete=models.CASCADE, related_name='payment_processings', default=1
     )
     name = models.CharField(max_length=200)
     processing_status = models.CharField(
@@ -762,7 +768,6 @@ class Underwriting(models.Model):
         return 'High'
     
 class PremiumPayment(models.Model):
-
     policy_holder = models.ForeignKey('PolicyHolder', on_delete=models.CASCADE, related_name='premium_payments')
     annual_premium = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
     interval_payment = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
@@ -989,8 +994,8 @@ class PremiumPayment(models.Model):
 # Agent Report
 class AgentReport(models.Model):
     agent = models.ForeignKey(SalesAgent, on_delete=models.CASCADE)
-    company = models.ForeignKey(
-        Company, on_delete=models.CASCADE, related_name='agent_reports', default=1)
+    branch = models.ForeignKey(
+        Branch, on_delete=models.CASCADE, related_name='agent_reports', default=1)
     report_date = models.DateField()
     reporting_period = models.CharField(max_length=20)
     policies_sold = models.IntegerField(default=0)
