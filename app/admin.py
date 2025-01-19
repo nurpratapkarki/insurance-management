@@ -106,12 +106,6 @@ class BonusRateAdmin(admin.ModelAdmin):
     ordering = ['-year']
     search_fields = ('year',)
 
-#Bonus admin
-@admin.register(Bonus)
-class BonusAdmin(admin.ModelAdmin):
-    list_display = ('policy_holder', 'bonus_type', 'accrued_amount', 'start_date', 'last_updated')
-    list_filter = ('bonus_type',)
-    search_fields = ('policy_holder__first_name', 'policy_holder__last_name')
 
 
 class AgentReportInline(admin.TabularInline):
