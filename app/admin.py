@@ -5,6 +5,7 @@ from django.contrib import messages
 from datetime import date
 from django.core.exceptions import ValidationError
 from django import forms
+from decimal import Decimal
 from django.db.models import Sum
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import (
@@ -32,20 +33,15 @@ class BranchFilterMixin:
         # Handle branch filtering
             if db_field.name == "branch":
                 branch = getattr(request.user.profile, "branch", None)
-            if branch and branch.pk is not None:  # Check if branch is saved
-                kwargs["queryset"] = Branch.objects.filter(id=branch.id)
-            else:
-                kwargs["queryset"] = Branch.objects.none()  # Provide an empty queryset for unsaved instances
+                kwargs["queryset"] = Branch.objects.filter(id=branch.id) if branch else Branch.objects.none()
 
         # Handle company filtering
         elif db_field.name == "company":
             company = getattr(request.user.profile, "company", None)
-            if company and company.pk is not None:  # Check if company is saved
-                kwargs["queryset"] = Company.objects.filter(id=company.id)
-            else:
-                kwargs["queryset"] = Company.objects.none()  # Provide an empty queryset for unsaved instances
+            kwargs["queryset"] = Company.objects.filter(id=company.id) if company else Company.objects.none()
 
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
 
 
 
@@ -126,6 +122,7 @@ class AgentReportInline(admin.TabularInline):
     verbose_name = "Agent Report"
     verbose_name_plural = "Agent Reports"
 # Register Sales Agent
+
 @admin.register(SalesAgent)
 class SalesAgentAdmin(BranchFilterMixin,admin.ModelAdmin):
     list_display = ('id', 'agent_code', 'get_application_name', 'is_active', 'commission_rate', 'joining_date')
@@ -136,11 +133,16 @@ class SalesAgentAdmin(BranchFilterMixin,admin.ModelAdmin):
     
 
     def get_application_name(self, obj):
-        if obj.application:
-            return f"{obj.application.first_name} {obj.application.last_name}"
-        return "N/A"
+        return f"{obj.application.first_name} {obj.application.last_name}" if obj.application else "N/A"
+    
     get_application_name.short_description = 'Agent Name'
-
+    
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if not request.user.is_superuser and hasattr(request.user, 'profile'):
+            return qs.filter(branch=request.user.profile.branch)
+        return qs
+    
     def save_model(self, request, obj, form, change):
         # Populate non-document fields from the related AgentApplication
         if obj.application:
@@ -161,10 +163,12 @@ class BonusInline(admin.TabularInline):
         return Decimal('0.00')
 
     total_bonus_accrued.short_description = 'Total Bonus Accrued'  # Label for the column
+    
+    
 @admin.register(PolicyHolder)
-class PolicyHolderAdmin(admin.ModelAdmin, BranchFilterMixin):
+class PolicyHolderAdmin(admin.ModelAdmin):
     list_display = ('first_name', 'last_name', 'status', 'policy', 'sum_assured', 
-                   'payment_interval', 'occupation', 'maturity_date')
+                    'payment_interval', 'occupation', 'maturity_date')
     search_fields = ('first_name', 'last_name', 'policy__name')
     list_filter = ('status', 'policy', 'occupation')
     inlines = [BonusInline]
@@ -190,7 +194,7 @@ class PolicyHolderAdmin(admin.ModelAdmin, BranchFilterMixin):
         }),
         ("Policy Details", {
             'fields': (
-                'company', 'branch', 'policy', 'policy_number', 'agent',
+                'branch', 'policy', 'policy_number', 'agent','company',
                 'sum_assured', 'duration_years', 'payment_interval', 'payment_status',
                 'include_adb', 'include_ptd'
             )
@@ -211,29 +215,44 @@ class PolicyHolderAdmin(admin.ModelAdmin, BranchFilterMixin):
     )
 
     def get_queryset(self, request):
-        """Filter queryset based on user's company access"""
         qs = super().get_queryset(request)
-        if not request.user.is_superuser:
-            return qs.filter(branch=request.user.profile.branch)
-        return qs
+        if request.user.is_superuser:
+            return qs
+    
+        user_company = getattr(request.user.profile.branch, 'company', None)
+        if user_company:
+            return qs.filter(branch__company=user_company)
+        return qs.none()
 
-    def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        """Filter foreign key choices based on user's company"""
-        if db_field.name == "policy" and not request.user.is_superuser:
-            kwargs["queryset"] = InsurancePolicy.objects.filter(
-                company=request.user.company
-            )
-        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+def formfield_for_foreignkey(self, db_field, request, **kwargs):
+    if not request.user.is_superuser:
+        if db_field.name == "policy":
+            user_company = getattr(request.user.profile.branch, 'company', None)
+            if user_company:
+                kwargs["queryset"] = InsurancePolicy.objects.filter(
+                    branch__company=user_company
+                )
+            else:
+                kwargs["queryset"] = InsurancePolicy.objects.none()
+        elif db_field.name == "branch":
+            user_branch = getattr(request.user.profile, 'branch', None)
+            if user_branch:
+                kwargs["queryset"] = Branch.objects.filter(id=user_branch.id)
+            else:
+                kwargs["queryset"] = Branch.objects.none()
+    return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
 
     def save_model(self, request, obj, form, change):
-        """Handle PolicyHolder save"""
+        """Save model with additional validation and branch assignment"""
         try:
-            # Set company from user if not set
-            if not obj.company and not request.user.is_superuser:
-                obj.company = request.user.company
+            # Set branch if not set
+            if not obj.branch and hasattr(request.user, 'profile'):
+                obj.branch = request.user.profile.branch
 
-            # Validate required fields for new policy holders
-            if not change:
+            # Validate required fields
+            if not change:  # Only for new policy holders
                 if not obj.sum_assured:
                     form.add_error('sum_assured', 'Sum assured is required.')
                     return
@@ -241,14 +260,33 @@ class PolicyHolderAdmin(admin.ModelAdmin, BranchFilterMixin):
                     form.add_error('policy', 'Insurance policy is required.')
                     return
 
-            # Save the object - validation will happen in model's save method
             obj.save()
-
+            
         except ValidationError as e:
             form._errors.update(e.message_dict)
             messages.error(request, "Validation error occurred while saving the PolicyHolder.")
+            
+    def has_module_permission(self, request):
+        """Check if user has permission to access the module"""
+        if request.user.is_superuser:
+            return True
+        return hasattr(request.user, 'profile') and request.user.profile.branch is not None
 
-             
+    def has_add_permission(self, request):
+        """Check if user has permission to add policy holders"""
+        return self.has_module_permission(request)
+
+    def has_change_permission(self, request, obj=None):
+        """Check if user has permission to change policy holders"""
+        if not self.has_module_permission(request):
+            return False
+        if obj and not request.user.is_superuser:
+            return obj.branch == request.user.profile.branch
+        return True
+
+    def has_delete_permission(self, request, obj=None):
+        """Check if user has permission to delete policy holders"""
+        return self.has_change_permission(request, obj)
 # Register Underwriting
 @admin.register(Underwriting)
 class UnderwritingAdmin(admin.ModelAdmin, BranchFilterMixin):
@@ -257,10 +295,10 @@ class UnderwritingAdmin(admin.ModelAdmin, BranchFilterMixin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        if request.user.is_superuser:
-            return qs
-        return qs.filter(branch=request.user.profile.branch)
-    
+        if not request.user.is_superuser and hasattr(request.user, 'profile'):
+            return qs.filter(policy_holder__branch=request.user.profile.branch)
+        return qs
+
 
 # Register Claim Request
 @admin.register(ClaimRequest)
@@ -389,7 +427,7 @@ class EmployeePositionAdmin(admin.ModelAdmin):
 
 # Register Employee
 @admin.register(Employee)
-class EmployeeAdmin(BranchFilterMixin,admin.ModelAdmin):
+class EmployeeAdmin(BranchFilterMixin, admin.ModelAdmin):
     list_display = ('id', 'name', 'address', 'gender', 'date_of_birth', 'employee_position')
     list_filter = ('gender', 'employee_position')
     search_fields = ('name', 'address')
@@ -397,9 +435,9 @@ class EmployeeAdmin(BranchFilterMixin,admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        if request.user.is_superuser:
-            return qs
-        return qs.filter(branch=request.user.profile.branch)
+        if not request.user.is_superuser and hasattr(request.user, 'profile'):
+            return qs.filter(branch=request.user.profile.branch)
+        return qs
 
 
 # Register Payment Processing
@@ -417,14 +455,12 @@ class PaymentProcessingAdmin(admin.ModelAdmin, BranchFilterMixin):
 #Branch admin registration
 
 # agent application
+
 @admin.register(AgentApplication)
 class AgentApplicationAdmin(BranchFilterMixin,admin.ModelAdmin):
-    list_display = (
-        'id', 'first_name', 'last_name', 'company', 'branch',
-        'email', 'phone_number', 'status', 'created_at'
-    )
+    list_display = ('id', 'first_name', 'last_name', 'branch', 'email', 'phone_number', 'status', 'created_at')
     search_fields = ('first_name', 'last_name', 'email', 'phone_number')
-    list_filter = ('company', 'branch', 'status', 'gender', 'created_at')
+    list_filter = ('branch', 'status', 'gender', 'created_at')
     ordering = ('-created_at',)
     fieldsets = (
         ("Personal Information", {
@@ -440,17 +476,20 @@ class AgentApplicationAdmin(BranchFilterMixin,admin.ModelAdmin):
                 'license_front', 'license_back', 'pp_photo',
                 'license_number', 'license_issue_date', 'license_expiry_date',
                 'license_type', 'license_issue_district', 'license_issue_zone',
-                'license_issue_province', 'license_issue_country'
+                'license_issue_province', 'license_issue_country', 'branch'
             )
         }),
-        ("Company and Branch Information", {
-            'fields': ('company', 'branch')
-        }),
+        
         ("Status Information", {
             'fields': ('status', 'created_at')
         }),
     )
-
+    def save_model(self, request, obj, form, change):
+        # Automatically assign branch for non-superusers
+        if not change and not request.user.is_superuser:
+            obj.branch = getattr(request.user.profile, 'branch', None)
+        super().save_model(request, obj, form, change)
+        
 @admin.register(MortalityRate)
 class MortalityRateAdmin(admin.ModelAdmin):
     list_display = ('company', 'age_group_start', 'age_group_end', 'rate')
@@ -466,7 +505,7 @@ class LoanAdmin(admin.ModelAdmin, BranchFilterMixin):
     search_fields = ('policy_holder__first_name', 'policy_holder__last_name')
 #Loan Repayment Admin
 @admin.register(LoanRepayment)
-class LoanRepaymentAdmin(admin.ModelAdmin, BranchFilterMixin):
+class LoanRepaymentAdmin(BranchFilterMixin, admin.ModelAdmin):
     list_display = ('loan', 'amount', 'repayment_type', 'repayment_date', 'remaining_loan_balance')
     readonly_fields = ('remaining_loan_balance',)
 
@@ -479,20 +518,19 @@ class CompanyAdmin(admin.ModelAdmin):
 
 @admin.register(Branch)
 class BranchAdmin(admin.ModelAdmin):
-    list_display = ('name', 'branch_code', 'company', 'location')
+    list_display = ('name', 'branch_code', 'location')
     search_fields = ('name', 'branch_code')
-    list_filter = ('company',)
-    readonly_fields = ('company',)
-
+    list_filter = ('location',)
+    
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         if not request.user.is_superuser:
-            return qs.filter(company=request.user.profile.company)
+            return qs.filter(branch=request.user.profile.branch)
         return qs
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        if db_field.name == "company" and not request.user.is_superuser:
-            kwargs["queryset"] = Company.objects.filter(id=request.user.profile.company.id)
+        if db_field.name == "branch" and not request.user.is_superuser:
+            kwargs["queryset"] = branch.objects.filter(id=request.user.profile.branch.id)
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 @admin.register(UserProfile)
@@ -516,22 +554,19 @@ class UserProfileAdmin(admin.ModelAdmin):
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 # Unregister the default User admin and register custom one
+
 admin.site.unregister(User)
 
 @admin.register(User)
 class CustomUserAdmin(BaseUserAdmin):
-    list_display = ('username', 'email', 'is_superuser', 'get_branch', 'get_company')
+    list_display = ('username', 'email', 'is_superuser', 'get_branch')
     search_fields = ('username', 'email')
     list_filter = ('is_superuser', 'is_active')
 
     def get_branch(self, obj):
-        return obj.profile.branch.name if obj.profile.branch else "Not Assigned"
-    
-    def get_company(self, obj):
-        return obj.profile.company.name if obj.profile.company else "Not Assigned"
-    
+        return obj.profile.branch.name if hasattr(obj, 'profile') and obj.profile.branch else "Not Assigned"
     get_branch.short_description = 'Branch'
-    get_company.short_description = 'Company'
+    
 
     def save_model(self, request, obj, form, change):
         creating = not obj.pk

@@ -183,8 +183,6 @@ class SSVConfig(models.Model):
 
 class AgentApplication(models.Model):
     id = models.BigAutoField(primary_key=True)
-    company = models.ForeignKey(
-        Company,  on_delete=models.CASCADE, related_name='agent_applications', default=1)
     branch = models.ForeignKey(
         Branch, on_delete=models.CASCADE, related_name='agent_applications', default=1)
     first_name = models.CharField(max_length=200)
@@ -233,7 +231,6 @@ class AgentApplication(models.Model):
         verbose_name = 'Agent Application'
         verbose_name_plural = 'Agent Applications'
         indexes = [
-            models.Index(fields=['company']),
             models.Index(fields=['branch']),
             models.Index(fields=['status']),
         ]
@@ -245,8 +242,6 @@ class AgentApplication(models.Model):
 
 class SalesAgent(models.Model):
     id = models.BigAutoField(primary_key=True)
-    company = models.ForeignKey(
-        Company, on_delete=models.CASCADE, related_name='sales_agents', default=1)
     branch = models.ForeignKey(
         Branch, on_delete=models.CASCADE, related_name='sales_agents', default=1)
     application = models.OneToOneField(
@@ -287,7 +282,6 @@ class SalesAgent(models.Model):
         verbose_name = 'Sales Agent'
         verbose_name_plural = 'Sales Agents'
         indexes = [
-            models.Index(fields=['company']),
             models.Index(fields=['branch']),
             models.Index(fields=['total_policies_sold']),
             models.Index(fields=['status']),
@@ -326,17 +320,12 @@ class DurationFactor(models.Model):
 
 class PolicyHolder(models.Model):
     id = models.BigAutoField(primary_key=True)
-    company = models.ForeignKey(
-        Company,  on_delete=models.CASCADE, related_name='policy_holders', default=1)
-    branch = models.ForeignKey(
-        Branch, on_delete=models.CASCADE, blank=True, null=True)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='policy_holders', default=1)
+    branch = models.ForeignKey(Branch, on_delete=models.CASCADE, blank=True, null=True)
     policy_number = models.IntegerField(
         unique=True, default='', blank=True, null=True)
-    agent = models.ForeignKey(
-        SalesAgent, on_delete=models.CASCADE, null=True, blank=True, default='')
-    policy = models.ForeignKey(
-        InsurancePolicy, related_name='policy_holders', on_delete=models.CASCADE, blank=True, null=True
-    )
+    agent = models.ForeignKey(SalesAgent, on_delete=models.CASCADE, null=True, blank=True)
+    policy = models.ForeignKey(InsurancePolicy, related_name='policy_holders', on_delete=models.CASCADE, blank=True, null=True)
     duration_years = models.PositiveIntegerField(default=1)
     sum_assured = models.DecimalField(
         max_digits=12, decimal_places=2, null=True, blank=True)
@@ -526,7 +515,7 @@ class PolicyHolder(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=['company', 'branch']),
+            models.Index(fields=['branch']),
             models.Index(fields=['policy']),
         ]        
 #policy holders end
@@ -574,7 +563,9 @@ class Bonus(models.Model):
 
     def __str__(self):
         return f"Bonus {self.bonus_type} for {self.policy_holder.first_name} {self.policy_holder.last_name}"
-
+    class Meta:
+        verbose_name = "Bonus"
+        verbose_name_plural = "Bonuses"
 
 # claim requestes
 

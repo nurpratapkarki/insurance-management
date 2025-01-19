@@ -20,7 +20,8 @@ from .models import (
     PaymentProcessing,
     Branch,
     Company,
-    UserProfile
+    UserProfile,
+    Bonus
 )
 
 @receiver(post_save, sender=PolicyHolder)
@@ -156,6 +157,8 @@ def update_agent_report(sender, instance, **kwargs):
 
     except Exception as e:
         print(f"Error in update_agent_report signal: {str(e)}")
+        
+    #  Add signal to handle agent application approval
 
 @receiver(post_save, sender=AgentApplication)
 def agent_application_approval(sender, instance, created, **kwargs):
@@ -163,18 +166,27 @@ def agent_application_approval(sender, instance, created, **kwargs):
     Create SalesAgent when application is approved
     """
     try:
-        if instance.status == "Approved" and not hasattr(instance, 'sales_agent'):
-            agent_code = f"A-{instance.company.id}-{instance.branch.id}-{str(instance.id).zfill(4)}"
+        # Check if application is approved and doesn't already have a sales agent
+        if instance.status.upper() == "APPROVED" and not SalesAgent.objects.filter(application=instance).exists():
+            # Generate unique agent code
+            agent_code = f"A-{instance.branch.company.id}-{instance.branch.id}-{str(instance.id).zfill(4)}"
             
+            # Create new sales agent
             SalesAgent.objects.create(
-                company=instance.company,
                 branch=instance.branch,
                 application=instance,
                 agent_code=agent_code,
-                commission_rate=Decimal('5.00')  # Default commission rate
+                commission_rate=Decimal('5.00'),  # Default commission rate
+                is_active=True,
+                joining_date=date.today(),
+                status='ACTIVE'
             )
+            
+            print(f"Successfully created sales agent for application {instance.id}")
+            
     except Exception as e:
         print(f"Error in agent_application_approval signal: {str(e)}")
+        raise  # Re-raise the exception to ensure it's not silently ignored
 
 # Optional: Add signal to handle policy renewal
 @receiver(post_save, sender=PolicyHolder)
@@ -238,16 +250,13 @@ def auto_finalize_payment(sender, instance, **kwargs):
         )
 
 # Signal to create UserProfile when User is created
-
 @receiver(post_save, sender=User)
 def create_or_update_user_profile(sender, instance, created, **kwargs):
     """Create or update UserProfile when User is created/updated."""
     if created:
-        UserProfile.objects.create(user=instance)
-        
-        # If non-superuser, try to assign first company
+        profile = UserProfile.objects.create(user=instance)
         if not instance.is_superuser:
             first_company = Company.objects.first()
             if first_company:
-                instance.profile.company = first_company
-                instance.profile.save()
+                profile.company = first_company
+                profile.save()
