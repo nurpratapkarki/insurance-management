@@ -133,6 +133,11 @@ class SalesAgentAdmin(BranchFilterMixin,admin.ModelAdmin):
         super().save_model(request, obj, form, change)
         
 #Bonus inline for the policyholder
+class BonusAdmin(admin.ModelAdmin):
+    list_display = ('id', 'policyholder', 'bonus_amount', 'bonus_date')
+    list_filter = ('bonus_date',)
+    search_fields = ('policyholder__first_name', 'policyholder__last_name')
+    
 class BonusInline(admin.TabularInline):
     model = Bonus
     extra = 0
@@ -149,10 +154,11 @@ class BonusInline(admin.TabularInline):
     
 @admin.register(PolicyHolder)
 class PolicyHolderAdmin(BranchFilterMixin, admin.ModelAdmin):
-    list_display = ('first_name', 'last_name', 'status', 'policy', 'sum_assured', 
+    list_display = ('policy_number','first_name', 'last_name', 'status', 'policy', 'sum_assured', 
                     'payment_interval', 'occupation', 'maturity_date')
     search_fields = ('first_name', 'last_name', 'policy__name')
     list_filter = ('status', 'policy', 'occupation')
+    inlines = [BonusInline]
     fieldsets = (
         ("Personal Information", {
             'fields': (
@@ -481,6 +487,7 @@ class LoanAdmin(admin.ModelAdmin, BranchFilterMixin):
     list_display = ('policy_holder', 'loan_amount', 'remaining_balance', 'accrued_interest', 'loan_status', 'created_at')
     readonly_fields = ('remaining_balance', 'accrued_interest', 'last_interest_date')
     search_fields = ('policy_holder__first_name', 'policy_holder__last_name')
+    
 #Loan Repayment Admin
 @admin.register(LoanRepayment)
 class LoanRepaymentAdmin(BranchFilterMixin, admin.ModelAdmin):

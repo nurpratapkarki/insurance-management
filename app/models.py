@@ -1,12 +1,12 @@
 from django.db import models
 from django.contrib.auth.models import User, AbstractUser
 from datetime import date
-from decimal import Decimal
 from decimal import Decimal, ROUND_HALF_UP
 from django.core.exceptions import ValidationError
 from django.db.models.signals import post_save
 from django.utils.timezone import now
 from django.db.models import Sum
+from typing import Dict, Union
 from django.dispatch import receiver
 from .constants import (
     GENDER_CHOICES,
@@ -997,14 +997,12 @@ class AgentReport(models.Model):
     class Meta:
         verbose_name = 'Agent Report'
         verbose_name_plural = 'Agent Reports'
-        
-#Loan System Here
 
 class Loan(models.Model):
     policy_holder = models.ForeignKey('PolicyHolder', on_delete=models.CASCADE, related_name='loans')
     loan_amount = models.DecimalField(max_digits=12, decimal_places=2, help_text="Principal loan amount.")
     interest_rate = models.DecimalField(max_digits=5, decimal_places=2, default=10.00, help_text="Annual interest rate in percentage.")
-    remaining_balance = models.DecimalField(max_digits=12, decimal_places=2, editable=False, help_text="Remaining loan principal balance.", )
+    remaining_balance = models.DecimalField(max_digits=12, decimal_places=2, editable=False, help_text="Remaining loan principal balance.")
     accrued_interest = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False, help_text="Interest accrued on the loan.")
     loan_status = models.CharField(
         max_length=50, 
@@ -1013,46 +1011,107 @@ class Loan(models.Model):
     )
     last_interest_date = models.DateField(auto_now_add=True, help_text="Date when interest was last accrued.")
     created_at = models.DateField(auto_now_add=True)
-    updated_at = models.DateField( auto_now_add=True)
+    updated_at = models.DateField(auto_now_add=True)
 
-    def calculate_max_loan(self):
-        """Calculate the maximum loan amount as 90% of the GSV."""
-        gsv = self.policy_holder.premium_payments.first().gsv_value  # Use the latest GSV
-        return gsv * Decimal('0.90')
+    def calculate_max_loan(self, requested_amount: Decimal = None) -> Dict[str, Union[bool, str, Decimal]]:
+        """
+        Calculate maximum loan amount and validate requested amount if provided.
+        """
+        try:
+            premium_payment = self.policy_holder.premium_payments.first()
+            if not premium_payment:
+                return {
+                    'is_valid': False,
+                    'message': 'No premium payments found for policy holder',
+                    'max_allowed': Decimal('0'),
+                    'gsv_value': Decimal('0')
+                }
+            
+            gsv = premium_payment.gsv_value
+            max_loan = gsv * Decimal('0.90')
+            
+            result = {
+                'is_valid': True,
+                'message': 'Maximum loan amount calculated',
+                'max_allowed': max_loan,
+                'gsv_value': gsv
+            }
+            
+            if requested_amount is not None:
+                if requested_amount <= Decimal('0'):
+                    result.update({
+                        'is_valid': False,
+                        'message': 'Loan amount must be greater than 0',
+                        'requested_amount': requested_amount
+                    })
+                elif requested_amount > max_loan:
+                    result.update({
+                        'is_valid': False,
+                        'message': f'Loan amount exceeds maximum allowed amount of {max_loan}',
+                        'requested_amount': requested_amount
+                    })
+                else:
+                    result.update({
+                        'message': 'Loan amount is valid',
+                        'requested_amount': requested_amount
+                    })
+            
+            return result
+            
+        except Exception as e:
+            return {
+                'is_valid': False,
+                'message': f'Error calculating maximum loan: {str(e)}',
+                'max_allowed': Decimal('0'),
+                'gsv_value': Decimal('0')
+            }
+
+    def clean(self):
+        """Validate the loan before saving."""
+        if not self.pk:  # Only validate on creation
+            validation = self.calculate_max_loan(self.loan_amount)
+            if not validation['is_valid']:
+                raise ValidationError({
+                    'loan_amount': validation['message']
+                })
+
+    def save(self, *args, **kwargs):
+        """Save the loan with validation."""
+        try:
+            self.full_clean()  # This will call our clean() method
+            if not self.pk:  # On loan creation
+                self.remaining_balance = self.loan_amount
+            super().save(*args, **kwargs)
+        except ValidationError as e:
+            raise ValidationError(e.message_dict)
+        except Exception as e:
+            raise ValidationError({
+                'non_field_errors': [f'Error saving loan: {str(e)}']
+            })
 
     def accrue_interest(self):
         """Accrue interest on the remaining balance."""
-        today = date.today()
         if self.loan_status != 'Active':
-            return  # Skip loans that are already paid
+            return
 
-        # Calculate the number of days since the last interest accrual
+        today = date.today()
         days_since_last_accrual = (today - self.last_interest_date).days
 
         if days_since_last_accrual <= 0:
-            return  # No accrual needed
+            return
 
-        # Calculate daily interest rate and interest for elapsed days
-        daily_rate = self.interest_rate / 100 / 365
-        interest = self.remaining_balance * Decimal(daily_rate) * Decimal(days_since_last_accrual)
+        try:
+            daily_rate = self.interest_rate / 100 / 365
+            interest = self.remaining_balance * Decimal(daily_rate) * Decimal(days_since_last_accrual)
 
-        # Update accrued interest and last accrual date
-        self.accrued_interest += interest.quantize(Decimal('1.00'))
-        self.last_interest_date = today
-        self.save()
-
-    def save(self, *args, **kwargs):
-        """Validate and initialize loan."""
-        if not self.pk:  # On loan creation
-            max_loan = self.calculate_max_loan()
-            if self.loan_amount > max_loan:
-                raise ValidationError(f"Loan amount exceeds the maximum allowed ({max_loan}).")
-            self.remaining_balance = self.loan_amount
-        super().save(*args, **kwargs)
+            self.accrued_interest += interest.quantize(Decimal('1.00'))
+            self.last_interest_date = today
+            self.save()
+        except Exception as e:
+            raise ValidationError(f'Error accruing interest: {str(e)}')
 
     def __str__(self):
         return f"Loan for {self.policy_holder} - {self.loan_status}"
-
 #Loan Repayment Model
 class LoanRepayment(models.Model):
     loan = models.ForeignKey(Loan, on_delete=models.CASCADE, related_name='repayments')
