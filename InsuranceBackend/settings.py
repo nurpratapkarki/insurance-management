@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure--j7f+hc)-#itl%!w0(0^-_4uh!e3=!ezo0*@4tnyg^rr1e!rry
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ['*', 'https://insurance-management-abok.onrender.com']
 
 PORT = os.environ.get('PORT', 8000)
 # Application definition
