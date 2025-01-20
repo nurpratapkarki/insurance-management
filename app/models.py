@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User, AbstractUser
 from datetime import date
+from decimal import Decimal
 from decimal import Decimal, ROUND_HALF_UP
 from django.core.exceptions import ValidationError
 from django.db.models.signals import post_save
@@ -38,16 +39,17 @@ class Occupation(models.Model):
         return self.name
     
 class MortalityRate(models.Model):
-    company = models.ForeignKey('Company', on_delete=models.CASCADE, related_name='mortality_rates')
+    
     age_group_start = models.PositiveIntegerField()
     age_group_end = models.PositiveIntegerField()
     rate = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
 
     class Meta:
-        unique_together = ('company', 'age_group_start', 'age_group_end')
+        unique_together = ( 'age_group_start', 'age_group_end')
 
     def __str__(self):
         return f"{self.age_group_start}-{self.age_group_end}: {self.rate}%"
+
 class Company(models.Model):
     id = models.BigAutoField(primary_key=True)
     name = models.CharField(max_length=255, unique=True)
@@ -113,6 +115,8 @@ class InsurancePolicy(models.Model):
     base_multiplier = models.DecimalField(max_digits=5, decimal_places=2, default=1.0)
     min_sum_assured = models.DecimalField(max_digits=12, decimal_places=2, default=500.00)
     max_sum_assured = models.DecimalField(max_digits=12, decimal_places=2, default=10000.00)
+    include_adb = models.BooleanField(default=False)
+    include_ptd = models.BooleanField(default=False)
     adb_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)  # ADB charge %
     ptd_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)  # PTD charge %
     description = models.TextField(null=True, blank=True)
@@ -286,36 +290,33 @@ class SalesAgent(models.Model):
             models.Index(fields=['total_policies_sold']),
             models.Index(fields=['status']),
         ]
-
+        
 class DurationFactor(models.Model):
     min_duration = models.PositiveIntegerField(help_text="Minimum duration in years")
     max_duration = models.PositiveIntegerField(help_text="Maximum duration in years")
     factor = models.DecimalField(max_digits=5, decimal_places=2)
     policy_type = models.CharField(max_length=50, choices=POLICY_TYPES)
-    
+
     class Meta:
-        unique_together = [ 'min_duration', 'max_duration', 'policy_type']
+        unique_together = ['min_duration', 'max_duration', 'policy_type']
         ordering = ['min_duration']
 
     def clean(self):
         if self.min_duration >= self.max_duration:
             raise ValidationError("Minimum duration must be less than maximum duration")
-        
-        # Check for overlapping ranges for same company and policy type
+
         overlapping = DurationFactor.objects.filter(
-            company=self.company,
             policy_type=self.policy_type,
             min_duration__lte=self.max_duration,
             max_duration__gte=self.min_duration
         ).exclude(pk=self.pk)
-        
+
         if overlapping.exists():
-            raise ValidationError("Duration ranges cannot overlap for the same company and policy type")
+            raise ValidationError("Duration ranges cannot overlap for the same policy type")
 
     def __str__(self):
-        return f"{self.company} - {self.policy_type} ({self.min_duration}-{self.max_duration} years): {self.factor}x"
-    
-    
+        return f"{self.policy_type} ({self.min_duration}-{self.max_duration} years): {self.factor}x"
+
 #policy holders start
 
 class PolicyHolder(models.Model):
@@ -468,26 +469,26 @@ class PolicyHolder(models.Model):
         return None
 
     def generate_policy_number(self):
-        """Generate a unique policy number"""
+        """Generate a unique policy number."""
         if not self.company or not self.branch:
             return None
-            
+
         try:
             last_holder = PolicyHolder.objects.filter(
-                company=self.company,
-                branch=self.branch
+                company=self.company, branch=self.branch
             ).exclude(policy_number__isnull=True).order_by('-policy_number').first()
-            
-            if last_holder and last_holder.policy_number:
-                # Extract the numeric part
-                last_number = int(last_holder.policy_number[-5:])
-            else:
-                last_number = 0
-                
+
+            last_number = int(str(last_holder.policy_number)[-5:]) if last_holder else 0
             new_number = last_number + 1
             return f"{self.company.company_code}{self.branch.branch_code}{str(new_number).zfill(5)}"
-        except (ValueError, AttributeError):
-            return None
+        except Exception as e:
+            raise ValueError(f"Error generating policy number: {e}")
+
+        def save(self, *args, **kwargs):
+            """Override save to handle automatic field updates."""
+            if not self.policy_number:
+                self.policy_number = self.generate_policy_number()
+            super().save(*args, **kwargs)
 
     def save(self, *args, **kwargs):
         """Override save method to handle automatic field updates"""
@@ -833,7 +834,6 @@ class PremiumPayment(models.Model):
         
         try:
             factor = DurationFactor.objects.get(
-                company=self.policy_holder.company,
                 policy_type=policy_type,
                 min_duration__lte=duration_years,
                 max_duration__gte=duration_years
@@ -961,7 +961,6 @@ class PremiumPayment(models.Model):
 
         try:
             mortality_rate = MortalityRate.objects.get(
-                company=company,
                 age_group_start__lte=age,
                 age_group_end__gte=age
             )

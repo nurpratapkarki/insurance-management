@@ -26,28 +26,18 @@ from .models import (
 
 @receiver(post_save, sender=PolicyHolder)
 def policy_holder_post_save(sender, instance, created, **kwargs):
-    """
-    Handle all post-save operations for PolicyHolder:
-    - Creates/updates premium payments for approved/active policies
-    - Creates underwriting records for pending policies
-    - Updates related records
-    """
+    """Handle post-save operations for PolicyHolder."""
     try:
         with transaction.atomic():
             # Create or update PremiumPayment for approved/active policies
             if instance.status in ['Approved', 'Active']:
-                premium_payment, created = PremiumPayment.objects.get_or_create(
+                PremiumPayment.objects.get_or_create(
                     policy_holder=instance,
                     defaults={
                         'payment_interval': instance.payment_interval,
                         'payment_mode': instance.payment_mode
                     }
                 )
-                
-                if created or instance.sum_assured != getattr(premium_payment, '_original_sum_assured', None):
-                    premium_payment.calculate_premium()
-                    premium_payment._original_sum_assured = instance.sum_assured
-                    premium_payment.save()
             
             # Create Underwriting record for pending policies
             if instance.status == 'Pending':
@@ -58,9 +48,9 @@ def policy_holder_post_save(sender, instance, created, **kwargs):
                         'medical_assessment': 'Pending'
                     }
                 )
-
     except Exception as e:
         print(f"Error in policy_holder_post_save signal: {str(e)}")
+
 
 @receiver(pre_delete, sender=PolicyHolder)
 def cleanup_policy_holder(sender, instance, **kwargs):
@@ -127,20 +117,15 @@ def update_policy_holder_payment_status(sender, instance, **kwargs):
 
 @receiver(post_save, sender=PremiumPayment)
 def update_agent_report(sender, instance, **kwargs):
-    """
-    Update or create AgentReport based on PremiumPayment updates
-    """
+    """Update or create AgentReport based on PremiumPayment updates."""
     try:
-        # Check if policy holder has an assigned agent
         if not instance.policy_holder.agent:
             return
 
         agent = instance.policy_holder.agent
-        
-        # Get or create agent report
         report, created = AgentReport.objects.get_or_create(
             agent=agent,
-            company=agent.company,
+            branch=agent.branch,
             report_date=instance.next_payment_date,
             defaults={
                 'policies_sold': 0,
@@ -154,24 +139,16 @@ def update_agent_report(sender, instance, **kwargs):
         report.policies_sold = report.policies_sold + 1 if created else report.policies_sold
         report.commission_earned += (instance.interval_payment * agent.commission_rate / 100)
         report.save()
-
     except Exception as e:
         print(f"Error in update_agent_report signal: {str(e)}")
-        
-    #  Add signal to handle agent application approval
 
+    #  Add signal to handle agent application approval
 @receiver(post_save, sender=AgentApplication)
 def agent_application_approval(sender, instance, created, **kwargs):
-    """
-    Create SalesAgent when application is approved
-    """
+    """Create SalesAgent when application is approved."""
     try:
-        # Check if application is approved and doesn't already have a sales agent
         if instance.status.upper() == "APPROVED" and not SalesAgent.objects.filter(application=instance).exists():
-            # Generate unique agent code
-            agent_code = f"A-{instance.branch.company.id}-{instance.branch.id}-{str(instance.id).zfill(4)}"
-            
-            # Create new sales agent
+            agent_code = f"A-{instance.branch.id}-{str(instance.id).zfill(4)}"
             SalesAgent.objects.create(
                 branch=instance.branch,
                 application=instance,
@@ -181,8 +158,10 @@ def agent_application_approval(sender, instance, created, **kwargs):
                 joining_date=date.today(),
                 status='ACTIVE'
             )
-            
-            print(f"Successfully created sales agent for application {instance.id}")
+    except Exception as e:
+        print(f"Error in agent_application_approval signal: {str(e)}")
+        raise
+
             
     except Exception as e:
         print(f"Error in agent_application_approval signal: {str(e)}")
@@ -236,9 +215,10 @@ def reset_interest_on_repayment(sender, instance, **kwargs):
 #Trigger Claim Processing wheneve the claim request is created
 @receiver(post_save, sender=ClaimRequest)
 def create_claim_processing(sender, instance, created, **kwargs):
+    """Create claim processing when a claim request is created."""
     if created:
         ClaimProcessing.objects.create(
-            company=instance.company,
+            branch=instance.branch,
             claim_request=instance
         )
 # automatically mark the paid onece the payment  is approved

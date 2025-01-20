@@ -18,31 +18,20 @@ from .models import (
 # Mixin for filtering 'Branch' and 'user' fields
 class BranchFilterMixin:
     def get_queryset(self, request):
-        """Filter queryset based on the user's branch and company."""
+        """Filter queryset based on the user's branch."""
         qs = super().get_queryset(request)
         if request.user.is_superuser:
-            return qs  # Superusers see all data
-
-        # Restrict access to branch-specific data
+            return qs
         if hasattr(self.model, 'branch'):
             return qs.filter(branch=request.user.profile.branch)
         return qs
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        if not request.user.is_superuser:
-        # Handle branch filtering
-            if db_field.name == "branch":
-                branch = getattr(request.user.profile, "branch", None)
-                kwargs["queryset"] = Branch.objects.filter(id=branch.id) if branch else Branch.objects.none()
-
-        # Handle company filtering
-        elif db_field.name == "company":
-            company = getattr(request.user.profile, "company", None)
-            kwargs["queryset"] = Company.objects.filter(id=company.id) if company else Company.objects.none()
-
+        """Filter branch-related fields for non-superusers."""
+        if db_field.name == "branch" and not request.user.is_superuser:
+            branch = getattr(request.user.profile, "branch", None)
+            kwargs["queryset"] = Branch.objects.filter(id=branch.id) if branch else Branch.objects.none()
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
-
-
 
 
 
@@ -158,14 +147,12 @@ class BonusInline(admin.TabularInline):
 
     total_bonus_accrued.short_description = 'Total Bonus Accrued'  # Label for the column
     
-    
 @admin.register(PolicyHolder)
-class PolicyHolderAdmin(admin.ModelAdmin):
+class PolicyHolderAdmin(BranchFilterMixin, admin.ModelAdmin):
     list_display = ('first_name', 'last_name', 'status', 'policy', 'sum_assured', 
                     'payment_interval', 'occupation', 'maturity_date')
     search_fields = ('first_name', 'last_name', 'policy__name')
     list_filter = ('status', 'policy', 'occupation')
-    inlines = [BonusInline]
     fieldsets = (
         ("Personal Information", {
             'fields': (
@@ -188,7 +175,7 @@ class PolicyHolderAdmin(admin.ModelAdmin):
         }),
         ("Policy Details", {
             'fields': (
-                'branch', 'policy', 'policy_number', 'agent','company',
+                'branch', 'policy', 'policy_number', 'agent',
                 'sum_assured', 'duration_years', 'payment_interval', 'payment_status',
                 'include_adb', 'include_ptd'
             )
@@ -209,14 +196,12 @@ class PolicyHolderAdmin(admin.ModelAdmin):
     )
 
     def get_queryset(self, request):
+        """Limit PolicyHolder queryset to user's branch."""
         qs = super().get_queryset(request)
         if request.user.is_superuser:
             return qs
-    
-        user_company = getattr(request.user.profile.branch, 'company', None)
-        if user_company:
-            return qs.filter(branch__company=user_company)
-        return qs.none()
+        branch = getattr(request.user.profile, 'branch', None)
+        return qs.filter(branch=branch) if branch else qs.none()
 
 
 def formfield_for_foreignkey(self, db_field, request, **kwargs):
@@ -486,8 +471,7 @@ class AgentApplicationAdmin(BranchFilterMixin,admin.ModelAdmin):
         
 @admin.register(MortalityRate)
 class MortalityRateAdmin(admin.ModelAdmin):
-    list_display = ('company', 'age_group_start', 'age_group_end', 'rate')
-    list_filter = ('company',)
+    list_display = ( 'age_group_start', 'age_group_end', 'rate')
     search_fields = ('company__name',)
 
 
