@@ -29,27 +29,24 @@ def policy_holder_post_save(sender, instance, created, **kwargs):
     """Handle post-save operations for PolicyHolder."""
     try:
         with transaction.atomic():
-            # Create or update PremiumPayment for approved/active policies
+            # Create PremiumPayment for approved/active policies
             if instance.status in ['Approved', 'Active']:
-                PremiumPayment.objects.get_or_create(
+                premium, created = PremiumPayment.objects.get_or_create(
                     policy_holder=instance,
                     defaults={
                         'payment_interval': instance.payment_interval,
                         'payment_mode': instance.payment_mode
                     }
                 )
+                if not created:
+                    premium.save()  # Ensure calculations are updated
             
             # Create Underwriting record for pending policies
-            if instance.status == 'Pending':
-                Underwriting.objects.get_or_create(
-                    policy_holder=instance,
-                    defaults={
-                        'risk_assessment': 'Pending',
-                        'medical_assessment': 'Pending'
-                    }
-                )
+            if instance.status in ['Pending', 'Active']:
+                Underwriting.objects.get_or_create(policy_holder=instance)
     except Exception as e:
         print(f"Error in policy_holder_post_save signal: {str(e)}")
+
 
 
 @receiver(pre_delete, sender=PolicyHolder)
@@ -188,18 +185,29 @@ def handle_policy_renewal(sender, instance, **kwargs):
                 
     except Exception as e:
         print(f"Error in handle_policy_renewal signal: {str(e)}")
-        
+    from django.db.models import Q
+
 @receiver(post_save, sender=PolicyHolder)
 def trigger_bonus_on_anniversary(sender, instance, **kwargs):
     """Trigger bonus calculation on policyholder's anniversary."""
     today = date.today()
-    if instance.start_date.month == today.month and instance.start_date.day == today.day:
-        # Create a bonus record for the policyholder
-        Bonus.objects.create(
-            policy_holder=instance,
-            bonus_type='SI',  # Assuming Simple Interest as default
-            start_date=today
-        )
+    
+    # Ensure policy is active and it is the anniversary
+    if instance.status == 'Active' and instance.start_date.month == today.month and instance.start_date.day == today.day:
+        # Check for existing bonus for the year
+        if not Bonus.objects.filter(
+            policy_holder=instance, 
+            start_date__year=today.year
+        ).exists():
+            try:
+                Bonus.objects.create(
+                    policy_holder=instance,
+                    bonus_type='SI',  # Assuming Simple Interest as default
+                    start_date=today
+                )
+            except ValueError as e:
+                print(f"Bonus creation failed: {e}")
+
 
 
 @receiver(post_save, sender=Loan)

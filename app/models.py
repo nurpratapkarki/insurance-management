@@ -436,24 +436,19 @@ class PolicyHolder(models.Model):
     maturity_date = models.DateField(null=True, blank=True)
     
     def clean(self):
-        """Validate the policy holder data"""
         errors = {}
-        
-        # Validate sum assured
-        if self.sum_assured and self.policy:
+        if self.sum_assured:
             if self.sum_assured < self.policy.min_sum_assured:
                 errors['sum_assured'] = f"Sum assured must be at least {self.policy.min_sum_assured}."
-            elif self.sum_assured > self.policy.max_sum_assured:
-                errors['sum_assured'] = f"Sum assured cannot exceed {self.policy.max_sum_assured}."
-        
-        # Validate age
+        elif self.sum_assured > self.policy.max_sum_assured:
+            errors['sum_assured'] = f"Sum assured cannot exceed {self.policy.max_sum_assured}."
         if self.date_of_birth:
             age = self.calculate_age()
-            if age < 18 or age > 60:
-                errors['date_of_birth'] = f"Age must be between 18 and 60. Current age: {age}."
-        
+        if age < 18 or age > 60:
+            errors['date_of_birth'] = f"Age must be between 18 and 60. Current age: {age}."
         if errors:
             raise ValidationError(errors)
+
 
     def calculate_age(self):
         """Calculate age based on date of birth"""
@@ -733,18 +728,52 @@ class Underwriting(models.Model):
 
 
     def calculate_risk(self):
-        """Calculate risk score based on age and occupation."""
-        age = self.policy_holder.age
-        if age is None:
-            raise ValidationError("PolicyHolder's age is not set. Ensure the date of birth is provided.")
-    
-        occupation_risk = {
-            'Low': 10,
-            'Moderate': 20,
-            'High': 30,
-        }.get(self.policy_holder.occupation.risk_category, 20)  # Default to Moderate risk if undefined
+        """Calculate risk score based on age, occupation, health, and behaviors."""
+        try:
+            age = self.policy_holder.age
+            occupation_risk = {
+                'Low': 10,
+                'Moderate': 20,
+                'High': 30,
+            }.get(self.policy_holder.occupation.risk_category, 10)  
 
-        return min(age + occupation_risk, 100)  # Capping at 100
+            # Calculate age-based risk
+            if age is None:
+                raise ValidationError("PolicyHolder's age is not set. Ensure the date of birth is provided.")
+            if age < 30:
+                age_risk = 5
+            elif 30 <= age <= 50:
+                age_risk = 15
+            else:  # age > 50
+                age_risk = 25
+
+            # Calculate health-related risks
+            health_risk = 0
+            if self.policy_holder.smoker:
+                health_risk += 20
+            if self.policy_holder.alcoholic:
+                health_risk += 15
+            if self.policy_holder.exercise_frequency == "Never":
+                health_risk += 10
+            elif self.policy_holder.exercise_frequency == "Rarely":
+                health_risk += 5
+
+            # Calculate family medical history risk
+            medical_history_risk = 0
+            if "diabetes" in (self.policy_holder.family_medical_history or "").lower():
+                medical_history_risk += 10
+            if "heart disease" in (self.policy_holder.family_medical_history or "").lower():
+                medical_history_risk += 15
+
+            # Combine all risks
+            total_risk = age_risk + occupation_risk + health_risk + medical_history_risk
+
+            # Cap the risk at 100
+            return min(total_risk, 100)
+
+        except Exception as e:
+            raise Exception(f"Error in risk calculation: {e}")
+
 
 
     def determine_risk_category(self):
@@ -768,6 +797,7 @@ class PremiumPayment(models.Model):
     gsv_value = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
     ssv_value = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
     payment_status = models.CharField(max_length=255, choices=PAYMENT_CHOICES, default='Unpaid')
+    
     
     def calculate_premium(self):
         """Calculate total and interval premiums with company-specific duration factors."""

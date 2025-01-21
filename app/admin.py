@@ -156,7 +156,7 @@ class BonusInline(admin.TabularInline):
 class PolicyHolderAdmin(BranchFilterMixin, admin.ModelAdmin):
     list_display = ('policy_number','first_name', 'last_name', 'status', 'policy', 'sum_assured', 
                     'payment_interval', 'occupation', 'maturity_date')
-    search_fields = ('first_name', 'last_name', 'policy__name')
+    search_fields = ('first_name', 'last_name','policy_number')
     list_filter = ('status', 'policy', 'occupation')
     inlines = [BonusInline]
     fieldsets = (
