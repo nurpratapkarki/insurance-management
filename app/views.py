@@ -8,8 +8,11 @@ from datetime import datetime
 from django.core.exceptions import ValidationError
 from .serializers import *
 from .models import *
+from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.admin.views.decorators import staff_member_required
+from django.shortcuts import render
 from django.http import JsonResponse
+from django.contrib.admin import site
 
 
 def handle_image_update(instance, field_name, request_data):
@@ -617,3 +620,24 @@ def get_policy_holders(request):
         for holder in policy_holders
     ]
     return JsonResponse(data, safe=False)
+
+
+def is_superuser(user):
+    return user.is_superuser
+
+@login_required
+@user_passes_test(is_superuser)
+def dashboard_view(request):
+    """View for displaying the dashboard."""
+    company_report = Dashboard.get_company_report()
+    branch_reports = Dashboard.get_branch_reports()
+    sales_agent_reports = Dashboard.get_sales_agent_reports()
+
+    context = {
+        **site.each_context(request),
+        'title': 'Dashboard',
+        'branch_reports': branch_reports,
+        'company_report': company_report,
+        'sales_agent_reports': sales_agent_reports,
+    }
+    return render(request, 'dashboard.html', context)

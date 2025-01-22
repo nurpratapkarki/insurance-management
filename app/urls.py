@@ -1,7 +1,7 @@
 # urls.py
 from django.urls import path
 from . import views
-from .views import fetch_policyholder_data, get_policy_holders
+from .views import fetch_policyholder_data, get_policy_holders, dashboard_view
 
 urlpatterns = [
     # Home/Dashboard
@@ -73,5 +73,6 @@ urlpatterns = [
     path('companies/<int:id>/delete', views.deleteCompany, name='deleteCompany'),
     path('policyholder-data/<int:policy_number>/', views.fetch_policyholder_data, name='fetch_policyholder_data'),
     path('holder/', views.get_policy_holders, name='get_policy_holders'),
+    path('dashboard/', dashboard_view, name='dashboard'),
 
 ]

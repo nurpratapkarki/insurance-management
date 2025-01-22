@@ -1,0 +1,407 @@
+{% extends 'admin/base_site.html' %}
+{% load static %}
+
+{% block extrastyle %}
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+<style>
+    :root {
+        --primary-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        --success-gradient: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        --info-gradient: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+        --card-bg: rgba(255, 255, 255, 0.95);
+    }
+
+    body {
+        background: radial-gradient(circle at top right, #f0f9ff 0%, #e0f2fe 100%);
+        min-height: 100vh;
+    }
+
+    .dashboard-header {
+        background: var(--card-bg);
+        border-radius: 24px;
+        padding: 2rem;
+        margin-bottom: 2rem;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+    }
+
+    .display-5 {
+        background: var(--primary-gradient);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 700;
+    }
+
+    /* Metric Cards */
+    .metric-card {
+        position: relative;
+        border-radius: 20px;
+        overflow: hidden;
+        transition: all 0.3s ease;
+        height: 100%;
+    }
+
+    .metric-card:hover {
+        transform: translateY(-5px);
+    }
+
+    .metric-card::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        right: -50%;
+        width: 200%;
+        height: 200%;
+        background: rgba(255, 255, 255, 0.1);
+        transform: rotate(45deg);
+        pointer-events: none;
+        transition: all 0.6s ease;
+    }
+
+    .metric-card:hover::before {
+        transform: rotate(45deg) translate(10%, 10%);
+    }
+
+    .policy-card { background: var(--primary-gradient); }
+    .premium-card { background: var(--success-gradient); }
+    .agent-card { background: var(--info-gradient); }
+
+    .metric-icon {
+        font-size: 2.5rem;
+        width: 60px;
+        height: 60px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 15px;
+        background: rgba(255, 255, 255, 0.2);
+        backdrop-filter: blur(5px);
+        margin-bottom: 1rem;
+    }
+
+    .metric-title {
+        font-size: 1rem;
+        font-weight: 500;
+        opacity: 0.9;
+        margin-bottom: 0.5rem;
+    }
+
+    .metric-value {
+        font-size: 2.5rem;
+        font-weight: 700;
+        line-height: 1;
+        margin-bottom: 0.5rem;
+    }
+
+    .metric-subtitle {
+        font-size: 0.875rem;
+        opacity: 0.8;
+    }
+
+    .currency-prefix {
+        font-size: 1.25rem;
+        font-weight: 500;
+        margin-right: 0.25rem;
+        opacity: 0.9;
+    }
+
+    /* Charts and Tables */
+    .chart-card {
+        background: var(--card-bg);
+        border-radius: 24px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        backdrop-filter: blur(10px);
+    }
+
+    .chart-container {
+        position: relative;
+        height: 300px;
+        padding: 1rem;
+    }
+
+    .table-card {
+        background: var(--card-bg);
+        border-radius: 24px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        backdrop-filter: blur(10px);
+    }
+
+    .table {
+        margin-bottom: 0;
+    }
+
+    .table thead th {
+        background: transparent;
+        font-size: 0.875rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #64748b;
+        border: none;
+        padding: 1rem;
+    }
+
+    .table tbody tr {
+        transition: background-color 0.3s ease;
+    }
+
+    .table tbody tr:hover {
+        background-color: rgba(255, 255, 255, 0.5);
+    }
+
+    .table td {
+        padding: 1rem;
+        border: none;
+        vertical-align: middle;
+    }
+
+    .card-header {
+        background: transparent;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+        padding: 1.25rem;
+    }
+
+    .card-title {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #1e293b;
+        margin: 0;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <!-- Header Section -->
+    <div class="dashboard-header">
+        <h1 class="display-5 mb-3">Insurance Dashboard</h1>
+        <p class="text-muted mb-0 font-bold">Don't Trust on Insurance companies and save your money in piggy bank</p>
+    </div>
+
+    <!-- Metric Cards -->
+    <div class="row g-4 mb-4">
+        <!-- Policy Holders Card -->
+        <div class="col-md-4">
+            <div class="metric-card policy-card p-4 text-white">
+                <div class="metric-icon">
+                    <i class="fas fa-users"></i>
+                </div>
+                <div class="metric-title">Total Policy Holders</div>
+                <div class="metric-value">{{ company_report.total_policy_holders }}</div>
+                <div class="metric-subtitle">Active insurance policies</div>
+            </div>
+        </div>
+
+        <!-- Total Premiums Card -->
+        <div class="col-md-4">
+            <div class="metric-card premium-card p-4 text-white">
+                <div class="metric-icon">
+                    <i class="fas fa-wallet"></i>
+                </div>
+                <div class="metric-title">Total Premiums</div>
+                <div class="metric-value">
+                    <span class="currency-prefix">Rs</span>
+                    {{ company_report.total_premiums|floatformat:0 }}
+                </div>
+                <div class="metric-subtitle">Revenue collected</div>
+            </div>
+        </div>
+
+        <!-- Active Agents Card -->
+        <div class="col-md-4">
+            <div class="metric-card agent-card p-4 text-white">
+                <div class="metric-icon">
+                    <i class="fas fa-user-tie"></i>
+                </div>
+                <div class="metric-title">Active Agents</div>
+                <div class="metric-value">{{ company_report.total_agents }}</div>
+                <div class="metric-subtitle">Insurance representatives</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="row g-4 mb-4">
+        <div class="col-md-6">
+            <div class="chart-card">
+                <div class="card-header">
+                    <h5 class="card-title">Branch Performance</h5>
+                </div>
+                <div class="chart-container">
+                    <canvas id="branchChart"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="chart-card">
+                <div class="card-header">
+                    <h5 class="card-title">Policy Distribution</h5>
+                </div>
+                <div class="chart-container">
+                    <canvas id="policyDistributionChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tables Row -->
+    <div class="row g-4">
+        <div class="col-md-6">
+            <div class="table-card">
+                <div class="card-header">
+                    <h5 class="card-title">Branch Reports</h5>
+                </div>
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Branch</th>
+                                <th>Policies</th>
+                                <th>Premiums</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for branch in branch_reports %}
+                            <tr>
+                                <td class="fw-medium">{{ branch.branch_name }}</td>
+                                <td>{{ branch.total_policies }}</td>
+                                <td>Rs {{ branch.total_premiums|floatformat:2 }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="table-card">
+                <div class="card-header">
+                    <h5 class="card-title">Sales Agent Reports</h5>
+                </div>
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Agent</th>
+                                <th>Policies Sold</th>
+                                <th>Premiums</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for agent in sales_agent_reports %}
+                            <tr>
+                                <td class="fw-medium">{{ agent.agent_name }}</td>
+                                <td>{{ agent.policies_sold }}</td>
+                                <td>Rs {{ agent.premium_collected|floatformat:2 }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extrajs %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+    Chart.defaults.font.size = 13;
+    Chart.defaults.plugins.legend.labels.usePointStyle = true;
+    
+    // Branch Performance Chart
+    const branchCtx = document.getElementById('branchChart').getContext('2d');
+    new Chart(branchCtx, {
+        type: 'bar',
+        data: {
+            labels: [{% for branch in branch_reports %}'{{ branch.branch_name }}',{% endfor %}],
+            datasets: [{
+                label: 'Total Policies',
+                data: [{% for branch in branch_reports %}{{ branch.total_policies }},{% endfor %}],
+                backgroundColor: [
+                    'rgba(99, 102, 241, 0.8)',
+                    'rgba(16, 185, 129, 0.8)',
+                    'rgba(59, 130, 246, 0.8)',
+                    'rgba(139, 92, 246, 0.8)',
+                    'rgba(14, 165, 233, 0.8)'
+                ],
+                borderRadius: 8,
+                borderSkipped: false
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'top',
+                    align: 'end'
+                }
+            },
+            scales: {
+                y: {
+                    grid: {
+                        display: true,
+                        drawBorder: false,
+                        color: 'rgba(0, 0, 0, 0.05)'
+                    },
+                    ticks: {
+                        padding: 10
+                    }
+                },
+                x: {
+                    grid: {
+                        display: false
+                    },
+                    ticks: {
+                        padding: 10
+                    }
+                }
+            }
+        }
+    });
+
+    // Policy Distribution Chart
+    const policyCtx = document.getElementById('policyDistributionChart').getContext('2d');
+    new Chart(policyCtx, {
+        type: 'doughnut',
+        data: {
+            labels: [{% for branch in branch_reports %}'{{ branch.branch_name }}',{% endfor %}],
+            datasets: [{
+                data: [{% for branch in branch_reports %}{{ branch.total_policies }},{% endfor %}],
+                backgroundColor: [
+                    'rgba(99, 102, 241, 0.8)',
+                    'rgba(16, 185, 129, 0.8)',
+                    'rgba(59, 130, 246, 0.8)',
+                    'rgba(139, 92, 246, 0.8)',
+                    'rgba(14, 165, 233, 0.8)'
+                ],
+                borderWidth: 0,
+                borderRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: {
+                        padding: 20,
+                        usePointStyle: true,
+                        pointStyle: 'circle'
+                    }
+                }
+            },
+            cutout: '65%'
+        }
+    });
+});
+</script>
+{% endblock %}
