@@ -199,34 +199,53 @@ JAZZMIN_SETTINGS = {
         {"name": "Dashboard", "url": "dashboard", "icon": "fas fa-home"},
     ],
     "icons": {
-        # Policy & Insurance Models
-        "app.policyholder": "fas fa-users",                # Represents multiple policyholders
-        "app.underwriting": "fas fa-shield-alt",           # Underwriting relates to risk and protection
-        "app.insurancepolicy": "fas fa-file-contract",     # Represents a policy or contract
-        "app.premiumpayment": "fas fa-wallet",             # Premium payments
+        # Occupation & Risk Models
+        "app.occupation": "fas fa-briefcase",                      # Occupation and its risk category
+        "app.mortalityrate": "fas fa-heartbeat",                   # Mortality rates
 
-        # Sales and Agents
-        "app.salesagent": "fas fa-user-tie",               # Sales agents
-        "app.agentapplication": "fas fa-envelope-open-text", # Applications for agents
-        "app.agentreport": "fas fa-file-alt",              # Reports related to agents
+        # Company & Branch Models
+        "app.company": "fas fa-building",                         # Company model
+        "app.branch": "fas fa-code-branch",                       # Branches under a company
 
-        # Company and Branch Models
-        "app.branch": "fas fa-code-branch",                # Represents branches
-        "app.company": "fas fa-building",                 # Represents a company
+        # User and Profile Models
+        "app.userprofile": "fas fa-user-circle",                  # User profile details
+        "app.employee": "fas fa-user-tie",                        # Employee model
+        "app.employeeposition": "fas fa-sitemap",                 # Employee positions
 
-        # Claims & Loans
-        "app.claimrequest": "fas fa-file-invoice-dollar",  # Requests for claims
-        "app.claimprocessing": "fas fa-hand-holding-usd",  # Claims processing (handling funds)
-        "app.loan": "fas fa-money-check-alt",              # Represents loans
-        "app.loanrepayment": "fas fa-hand-holding-dollar", # Loan repayments
+        # Insurance Policies
+        "app.insurancepolicy": "fas fa-file-contract",            # Insurance policies
+        "app.gsvrate": "fas fa-percentage",                       # Guaranteed Surrender Value rates
+        "app.ssvconfig": "fas fa-cogs",                           # Special Surrender Value configurations
 
-        # Bonuses & Financial
-        "app.bonus": "fas fa-gift",                       # Bonuses (rewards)
-        "app.bonusrate": "fas fa-money-bill-trend-up",    # Bonus rate configuration
+        # Policy Holder Models
+        "app.policyholder": "fas fa-id-card",                     # Policy holder details
+        "app.premiumpayment": "fas fa-wallet",                    # Premium payment records
+
+        # Loan & Repayment
+        "app.loan": "fas fa-money-check-alt",                     # Loan details
+        "app.loanrepayment": "fas fa-hand-holding-usd",           # Loan repayment records
+
+        # Sales Agents
+        "app.agentapplication": "fas fa-envelope-open-text",      # Agent application form
+        "app.salesagent": "fas fa-user-secret",                   # Sales agent records
+        "app.agentreport": "fas fa-chart-line",                   # Agent reports
+
+        # Bonuses & Rates
+        "app.bonusrate": "fas fa-money-bill-trend-up",            # Bonus rate percentages
+        "app.bonus": "fas fa-gift",                               # Bonus for policyholders
+
+        # Claims & Processing
+        "app.claimrequest": "fas fa-file-invoice-dollar",         # Claim requests
+        "app.claimprocessing": "fas fa-hand-holding-dollar",      # Claim processing
+
+        # Payment Processing
+        "app.paymentprocessing": "fas fa-credit-card",            # Payment processing records
+
+        # Underwriting
+        "app.underwriting": "fas fa-shield-alt",                  # Underwriting reports and risk assessments
 
         # Miscellaneous
-        "app.paymentprocessing": "fas fa-credit-card",     # Payment processing
-        "app.userprofile": "fas fa-user-circle",           # User profiles
+        "app.durationfactor": "fas fa-clock",                     # Duration factors for policies
     },
 }
 JAZZMIN_UI_TWEAKS = {
