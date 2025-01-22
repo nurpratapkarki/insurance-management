@@ -1252,3 +1252,4 @@ class Dashboard:
             })
 
         return agent_data
+    
