@@ -129,7 +129,7 @@ class SalesAgentAdmin(BranchFilterMixin,admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         # Populate non-document fields from the related AgentApplication
         if obj.application:
-            obj.agent_code = f"A-{obj.company.id}-{obj.branch.id}-{str(obj.application.id).zfill(4)}"
+            obj.agent_code = f"A-{obj.branch.id}-{str(obj.application.id).zfill(4)}"
         super().save_model(request, obj, form, change)
         
 #Bonus inline for the policyholder

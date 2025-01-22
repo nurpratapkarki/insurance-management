@@ -198,4 +198,38 @@ JAZZMIN_SETTINGS = {
         # Add dashboard to the user dropdown menu
         {"name": "Dashboard", "url": "dashboard", "icon": "fas fa-home"},
     ],
+    "icons": {
+        # Policy & Insurance Models
+        "app.policyholder": "fas fa-users",                # Represents multiple policyholders
+        "app.underwriting": "fas fa-shield-alt",           # Underwriting relates to risk and protection
+        "app.insurancepolicy": "fas fa-file-contract",     # Represents a policy or contract
+        "app.premiumpayment": "fas fa-wallet",             # Premium payments
+
+        # Sales and Agents
+        "app.salesagent": "fas fa-user-tie",               # Sales agents
+        "app.agentapplication": "fas fa-envelope-open-text", # Applications for agents
+        "app.agentreport": "fas fa-file-alt",              # Reports related to agents
+
+        # Company and Branch Models
+        "app.branch": "fas fa-code-branch",                # Represents branches
+        "app.company": "fas fa-building",                 # Represents a company
+
+        # Claims & Loans
+        "app.claimrequest": "fas fa-file-invoice-dollar",  # Requests for claims
+        "app.claimprocessing": "fas fa-hand-holding-usd",  # Claims processing (handling funds)
+        "app.loan": "fas fa-money-check-alt",              # Represents loans
+        "app.loanrepayment": "fas fa-hand-holding-dollar", # Loan repayments
+
+        # Bonuses & Financial
+        "app.bonus": "fas fa-gift",                       # Bonuses (rewards)
+        "app.bonusrate": "fas fa-money-bill-trend-up",    # Bonus rate configuration
+
+        # Miscellaneous
+        "app.paymentprocessing": "fas fa-credit-card",     # Payment processing
+        "app.userprofile": "fas fa-user-circle",           # User profiles
+    },
+}
+JAZZMIN_UI_TWEAKS = {
+    "theme": "lumen",
+    # "dark_mode_theme": "cyborg",
 }

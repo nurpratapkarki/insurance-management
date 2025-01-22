@@ -8,6 +8,7 @@ from datetime import datetime
 from django.core.exceptions import ValidationError
 from .serializers import *
 from .models import *
+from .frontend_data import Dashboard
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.admin.views.decorators import staff_member_required
 from django.shortcuts import render
