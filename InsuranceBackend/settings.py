@@ -178,11 +178,11 @@ JAZZMIN_SETTINGS = {
     "site_header": "Insurance Dashboard",
     "welcome_sign": "Welcome to the Insurance Admin Portal",
     "custom_links": {
-        "app": [  # Replace 'app' with your app name
+        "app": [  
             {
                 "name": "Dashboard",
-                "url": "dashboard",  # Django URL name for your dashboard view
-                "icon": "fas fa-chart-line",  # FontAwesome icon for the link
+                "url": "dashboard", 
+                "icon": "fas fa-chart-line", 
             },
         ],
     },
@@ -191,7 +191,7 @@ JAZZMIN_SETTINGS = {
     "topmenu_links": [
         # Add a dashboard link to the top menu
         {"name": "Dashboard", "url": "dashboard", "permissions": ["auth.view_user"]},
-        {"app": "app"},  # Include your app's models
+        {"app": "app"},  
     ],
     "copyright": "Sajha Life Insurance LTD",
     "usermenu_links": [
