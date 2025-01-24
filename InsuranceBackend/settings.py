@@ -240,10 +240,6 @@ JAZZMIN_SETTINGS = {
 
         # Payment Processing
         "app.paymentprocessing": "fas fa-credit-card",            # Payment processing records
-
-        # Underwriting
-        "app.underwriting": "fas fa-shield-alt",                  # Underwriting reports and risk assessments
-
         # Miscellaneous
         "app.durationfactor": "fas fa-clock",                     # Duration factors for policies
     },

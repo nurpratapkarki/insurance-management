@@ -41,14 +41,40 @@ def policy_holder_post_save(sender, instance, created, **kwargs):
                 if not created:
                     premium.save()  # Ensure calculations are updated
             
-            # Create Underwriting record for pending policies
-            if instance.status in ['Pending', 'Active']:
-                Underwriting.objects.get_or_create(policy_holder=instance)
     except Exception as e:
         print(f"Error in policy_holder_post_save signal: {str(e)}")
 
 
 
+
+@receiver(post_save, sender=PolicyHolder)
+def create_or_update_underwriting(sender, instance, created, **kwargs):
+    """Create or update underwriting for active or pending policyholders."""
+    # Avoid infinite recursion by skipping updates caused by the signal itself
+    if getattr(instance, '_from_signal', False):
+        return
+    
+    if instance.status in ['Pending', 'Active']:
+        underwriting, _ = Underwriting.objects.get_or_create(policy_holder=instance)
+
+        # Save underwriting without triggering PolicyHolder updates
+        underwriting._from_signal = True
+        underwriting.save()
+        underwriting._from_signal = False
+@receiver(post_save, sender=Underwriting)
+def update_policy_holder_from_underwriting(sender, instance, **kwargs):
+    """Update PolicyHolder's risk category based on Underwriting."""
+    # Skip updates if manual_override is enabled
+    if instance.manual_override:
+        return
+
+    policy_holder = instance.policy_holder
+
+    # Only update if the risk category has changed
+    if policy_holder.risk_category != instance.risk_category:
+        policy_holder.risk_category = instance.risk_category
+        policy_holder.save()
+        
 @receiver(pre_delete, sender=PolicyHolder)
 def cleanup_policy_holder(sender, instance, **kwargs):
     """

@@ -152,13 +152,20 @@ class BonusInline(admin.TabularInline):
 
     total_bonus_accrued.short_description = 'Total Bonus Accrued'  # Label for the column
     
+    
+class UnderwritingInline(admin.StackedInline):
+    model = Underwriting
+    extra = 0
+    readonly_fields = ( 'risk_category', 'last_updated_by', 'last_updated_at')
+
+    
 @admin.register(PolicyHolder)
 class PolicyHolderAdmin(BranchFilterMixin, admin.ModelAdmin):
     list_display = ('policy_number','first_name', 'last_name', 'status', 'policy', 'sum_assured', 
                     'payment_interval', 'occupation', 'maturity_date')
     search_fields = ('first_name', 'last_name','policy_number')
     list_filter = ('status', 'policy', 'occupation')
-    inlines = [BonusInline]
+    inlines = [BonusInline, UnderwritingInline]
     fieldsets = (
         ("Personal Information", {
             'fields': (
@@ -183,7 +190,7 @@ class PolicyHolderAdmin(BranchFilterMixin, admin.ModelAdmin):
             'fields': (
                 'branch', 'policy', 'policy_number', 'agent',
                 'sum_assured', 'duration_years', 'payment_interval', 'payment_status',
-                'include_adb', 'include_ptd'
+                'include_adb', 'include_ptd','risk_category'
             )
         }),
         ("Nominee Details", {
@@ -273,16 +280,6 @@ def formfield_for_foreignkey(self, db_field, request, **kwargs):
         """Check if user has permission to delete policy holders"""
         return self.has_change_permission(request, obj)
 # Register Underwriting
-@admin.register(Underwriting)
-class UnderwritingAdmin(admin.ModelAdmin, BranchFilterMixin):
-    list_display = ('policy_holder', 'risk_assessment_score', 'risk_category', 'remarks')
-    readonly_fields = ('risk_assessment_score', 'risk_category')
-
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        if not request.user.is_superuser and hasattr(request.user, 'profile'):
-            return qs.filter(policy_holder__branch=request.user.profile.branch)
-        return qs
 
 
 # Register Claim Request

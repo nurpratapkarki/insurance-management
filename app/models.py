@@ -429,6 +429,13 @@ class PolicyHolder(models.Model):
                  ("Online Payment", "Online Payment")],
         default="Online Payment"
     )
+    risk_category = models.CharField(
+        max_length=50,
+        choices=[('Low', 'Low Risk'), ('Moderate', 'Moderate Risk'), ('High', 'High Risk')],
+        default='Moderate',
+        blank=True,
+        help_text="Risk category assigned based on underwriting."
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')
     payment_status = models.CharField(
         max_length=50, choices=PROCESSING_STATUS_CHOICES, default="Due")
@@ -708,83 +715,77 @@ class PaymentProcessing(models.Model):
 
 # Underwriting Process Or report
 class Underwriting(models.Model):
-    policy_holder = models.OneToOneField('PolicyHolder', on_delete=models.CASCADE, related_name='underwriting')
-    risk_assessment_score = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
-    remarks = models.TextField(null=True, blank=True)
+    policy_holder = models.OneToOneField(
+        'PolicyHolder',
+        on_delete=models.CASCADE,
+        related_name='underwriting'
+    )
+    risk_assessment_score = models.DecimalField(
+        max_digits=5, decimal_places=2, default=0.00,
+        help_text="Calculated risk score (0-100)."
+    )
     risk_category = models.CharField(
         max_length=50,
         choices=[('Low', 'Low Risk'), ('Moderate', 'Moderate Risk'), ('High', 'High Risk')],
         default='Moderate'
     )
+    manual_override = models.BooleanField(
+        default=False,
+        help_text="Enable to manually update risk scores."
+    )
+    remarks = models.TextField(
+        null=True, blank=True, help_text="Additional remarks about underwriting."
+    )
+    last_updated_by = models.CharField(
+        max_length=50,
+        choices=[('System', 'System'), ('Admin', 'Admin')],
+        default='System'
+    )
+    last_updated_at = models.DateTimeField(auto_now=True)
 
     def save(self, *args, **kwargs):
-        try:
-            self.risk_assessment_score = self.calculate_risk()
-            self.risk_category = self.determine_risk_category()
-        except ValidationError as e:
-            raise ValidationError(f"Error calculating risk: {e}")
-        except Exception as e:
-            raise Exception(f"Unexpected error during risk calculation: {e}")
+        # Only calculate risk if manual override is disabled
+        if not self.manual_override:
+            self.calculate_risk()
+            self.last_updated_by = 'System'
+        else:
+            self.last_updated_by = 'Admin'
         super().save(*args, **kwargs)
 
-
     def calculate_risk(self):
-        """Calculate risk score based on age, occupation, health, and behaviors."""
+        """Automatically calculate the risk score based on policyholder data."""
         try:
             age = self.policy_holder.age
             occupation_risk = {
-                'Low': 10,
-                'Moderate': 20,
-                'High': 30,
-            }.get(self.policy_holder.occupation.risk_category, 10)  
+                'Low': 10, 'Moderate': 20, 'High': 30
+            }.get(self.policy_holder.occupation.risk_category, 10)
 
-            # Calculate age-based risk
-            if age is None:
-                raise ValidationError("PolicyHolder's age is not set. Ensure the date of birth is provided.")
-            if age < 30:
-                age_risk = 5
-            elif 30 <= age <= 50:
-                age_risk = 15
-            else:  # age > 50
-                age_risk = 25
+            # Age-based risk
+            age_risk = 5 if age < 30 else (15 if age <= 50 else 25)
 
-            # Calculate health-related risks
+            # Health and lifestyle risks
             health_risk = 0
             if self.policy_holder.smoker:
                 health_risk += 20
             if self.policy_holder.alcoholic:
                 health_risk += 15
-            if self.policy_holder.exercise_frequency == "Never":
-                health_risk += 10
-            elif self.policy_holder.exercise_frequency == "Rarely":
-                health_risk += 5
 
-            # Calculate family medical history risk
-            medical_history_risk = 0
-            if "diabetes" in (self.policy_holder.family_medical_history or "").lower():
-                medical_history_risk += 10
-            if "heart disease" in (self.policy_holder.family_medical_history or "").lower():
-                medical_history_risk += 15
-
-            # Combine all risks
-            total_risk = age_risk + occupation_risk + health_risk + medical_history_risk
-
-            # Cap the risk at 100
-            return min(total_risk, 100)
-
+            # Final risk score
+            total_risk = age_risk + occupation_risk + health_risk
+            self.risk_assessment_score = min(total_risk, 100)
+            self.risk_category = self.determine_risk_category()
         except Exception as e:
-            raise Exception(f"Error in risk calculation: {e}")
-
-
+            raise ValidationError(f"Error calculating risk: {e}")
 
     def determine_risk_category(self):
         score = self.risk_assessment_score
-        if score < 40:
-            return 'Low'
-        elif score < 70:
-            return 'Moderate'
-        return 'High'
-    
+        return 'Low' if score < 40 else 'Moderate' if score < 70 else 'High'
+
+    def __str__(self):
+        return f"Underwriting for {self.policy_holder} ({self.risk_category})"
+
+# Premium Payment Model
+
 class PremiumPayment(models.Model):
     policy_holder = models.ForeignKey('PolicyHolder', on_delete=models.CASCADE, related_name='premium_payments')
     annual_premium = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
@@ -798,134 +799,92 @@ class PremiumPayment(models.Model):
     gsv_value = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
     ssv_value = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
     payment_status = models.CharField(max_length=255, choices=PAYMENT_CHOICES, default='Unpaid')
-    
-    
+
     def calculate_premium(self):
-        """Calculate total and interval premiums with company-specific duration factors."""
-        policy = self.policy_holder.policy
-        sum_assured = self.policy_holder.sum_assured
-        duration_years = self.policy_holder.duration_years
+        """Calculate total and interval premiums for the policy."""
+        try:
+            policy = self.policy_holder.policy
+            sum_assured = self.policy_holder.sum_assured
+            duration_years = self.policy_holder.duration_years
 
-        if not sum_assured or not policy:
-            raise ValidationError("Sum assured and insurance policy are required.")
+            if not policy or not sum_assured:
+                raise ValidationError("Policy and Sum Assured are required for premium calculation.")
 
-        # Get mortality rate
-        mortality_rate = self.get_mortality_rate()
-        base_premium = (sum_assured * Decimal(mortality_rate)) / Decimal(100)
+            # Base premium logic
+            mortality_rate = self.get_mortality_rate()
+            if not mortality_rate:
+                raise ValidationError("No valid mortality rate found for the policyholder's age.")
 
-        # Get company-specific duration factor
-        duration_factor = self.get_duration_factor()
+            base_premium = (sum_assured * Decimal(mortality_rate)) / Decimal(100)
 
-        # Apply policy type multiplier and duration factor
-        if policy.policy_type == "Endowment":
-            adjusted_premium = base_premium * policy.base_multiplier * duration_factor
-        else:
-            # Term insurance - always uses base premium
-            adjusted_premium = base_premium
+            # Adjust premium based on policy type and duration factor
+            duration_factor = self.get_duration_factor()
+            if policy.policy_type == "Endowment":
+                adjusted_premium = base_premium * policy.base_multiplier * duration_factor
+            elif policy.policy_type == "Term":
+                adjusted_premium = base_premium
+            else:
+                raise ValidationError(f"Unsupported policy type: {policy.policy_type}")
 
-        # Calculate add-on charges based on sum assured
-        adb_charge = Decimal('0.00')
-        if policy.include_adb:
-            adb_charge = (sum_assured * Decimal(policy.adb_percentage)) / Decimal(100)
+            # Add ADB/PTD charges
+            adb_charge = (sum_assured * Decimal(policy.adb_percentage)) / Decimal(100) if policy.include_adb else Decimal('0.00')
+            ptd_charge = (sum_assured * Decimal(policy.ptd_percentage)) / Decimal(100) if policy.include_ptd else Decimal('0.00')
 
-        ptd_charge = Decimal('0.00')
-        if policy.include_ptd:
-            ptd_charge = (sum_assured * Decimal(policy.ptd_percentage)) / Decimal(100)
+            annual_premium = adjusted_premium + adb_charge + ptd_charge
 
-        # Total annual premium including all charges
-        annual_premium = adjusted_premium + adb_charge + ptd_charge
-
-        # Calculate interval payment based on payment frequency
-        interval_mapping = {
-            "quarterly": 4,
-            "semi_annual": 2,
-            "annual": 1,
-            "Single": 1,
-        }
-        interval_count = interval_mapping.get(self.policy_holder.payment_interval, 1)
-
-        if self.policy_holder.payment_interval == "Single":
-            # For single payment, calculate the total needed for the entire duration
-            # You might want to add a discount for single payment if needed
-            # single_payment_discount = Decimal('0.90')  # 10% discount example
-            total_premium = annual_premium * Decimal(duration_years)
-            interval_payment = total_premium
-        else:
+            # Calculate interval payment
+            interval_mapping = {"quarterly": 4, "semi_annual": 2, "annual": 1, "Single": 1}
+            interval_count = interval_mapping.get(self.policy_holder.payment_interval, 1)
             interval_payment = annual_premium / Decimal(interval_count)
 
-        # Round to 2 decimal places
-        annual_premium = annual_premium.quantize(Decimal('1.00'), rounding=ROUND_HALF_UP)
-        interval_payment = interval_payment.quantize(Decimal('1.00'), rounding=ROUND_HALF_UP)
-        return annual_premium, interval_payment
+            # Set calculated values
+            self.annual_premium = annual_premium.quantize(Decimal('1.00'))
+            self.interval_payment = interval_payment.quantize(Decimal('1.00'))
+            self.total_premium = annual_premium * Decimal(duration_years)
+        except ValidationError as e:
+            raise ValidationError(f"Error calculating premium: {e}")
 
-    def get_duration_factor(self):
-        """Get appropriate duration factor based on policy duration"""
-        duration_years = self.policy_holder.duration_years
-        policy_type = self.policy_holder.policy.policy_type
-        
-        try:
-            factor = DurationFactor.objects.get(
-                policy_type=policy_type,
-                min_duration__lte=duration_years,
-                max_duration__gte=duration_years
-            )
-            return factor.factor
-        except DurationFactor.DoesNotExist:
-            # Log that no duration factor was found
-            logger.warning(
-                f"No duration factor found for company {self.policy_holder.company.id}, "
-                f"policy type {policy_type}, duration {duration_years} years. Using default factor."
-            )
-            return Decimal('1.0')  # Default factor if no range defined
-    
     def calculate_gsv(self):
-        """Calculate GSV based on the applicable GSV rate, excluding the first year's premium."""
-        duration_years = (date.today() - self.policy_holder.start_date).days // 365
+        """Calculate Guaranteed Surrender Value (GSV)."""
+        try:
+            duration_years = (date.today() - self.policy_holder.start_date).days // 365
+            gsv_rate = self.policy_holder.policy.gsv_rates.filter(
+                min_year__lte=duration_years, max_year__gte=duration_years
+            ).first()
 
-    # Get the applicable GSV rate for the policy
-        applicable_rate = self.policy_holder.policy.gsv_rates.filter(
-            min_year__lte=duration_years, max_year__gte=duration_years
-        ).first()
+            if not gsv_rate:
+                return Decimal('0.00')  # No GSV defined for current duration
 
-        if not applicable_rate:
-            return Decimal(0)  # No GSV rate defined for the current duration
-
-        # Exclude the first year's premium from the calculation
-        first_year_premium = self.annual_premium
-        adjusted_total_paid = max(self.total_paid - first_year_premium, Decimal(0))
-
-    # Calculate GSV using the adjusted total paid
-        gsv = adjusted_total_paid * applicable_rate.rate / 100
-        return gsv.quantize(Decimal('1.00'))
-
+            paid_premium = max(self.total_paid - self.annual_premium, Decimal('0.00'))
+            return (paid_premium * gsv_rate.rate / Decimal(100)).quantize(Decimal('1.00'))
+        except Exception as e:
+            raise ValidationError(f"Error calculating GSV: {e}")
 
     def calculate_ssv(self):
-        """Calculate SSV based on policy duration and bonuses."""
-        duration_years = (date.today() - self.policy_holder.start_date).days // 365
-        premiums_paid = self.policy_holder.premium_payments.count()
-    
-        # Get applicable SSV configuration
-        applicable_range = self.policy_holder.policy.ssv_configs.filter(
-            min_year__lte=duration_years, 
-            max_year__gte=duration_years
-        ).first()
-    
-        if not applicable_range or premiums_paid < applicable_range.eligibility_years:
-            return Decimal(0)
-    
-        # Get total bonuses
-        total_bonuses = self.policy_holder.bonuses.aggregate(
-            total=Sum('accrued_amount'))['total'] or Decimal(0)
-    
-        # Calculate Premium Component
-        # SSV factor is applied to total premiums paid
-        premium_component = self.total_paid * (applicable_range.ssv_factor / 100)
-    
-        # Add Bonus Component
-        # Usually 100% of accrued bonuses are added to SSV
-        ssv = premium_component + total_bonuses
-    
-        return ssv.quantize(Decimal('1.00'))
+        """Calculate Special Surrender Value (SSV)."""
+        try:
+            duration_years = (date.today() - self.policy_holder.start_date).days // 365
+            premiums_paid = self.policy_holder.premium_payments.count()
+
+            # Get applicable SSV configuration
+            applicable_range = self.policy_holder.policy.ssv_configs.filter(
+                min_year__lte=duration_years, max_year__gte=duration_years
+            ).first()
+
+            if not applicable_range or premiums_paid < applicable_range.eligibility_years:
+                return Decimal('0.00')
+
+            # Total Bonuses
+            total_bonuses = self.policy_holder.bonuses.aggregate(
+                total=Sum('accrued_amount'))['total'] or Decimal('0.00')
+
+            # Calculate SSV
+            premium_component = self.total_paid * (applicable_range.ssv_factor / Decimal(100))
+            ssv = premium_component + total_bonuses
+
+            return ssv.quantize(Decimal('1.00'))
+        except Exception as e:
+            raise ValidationError(f"Error calculating SSV: {e}")
 
     def save(self, *args, **kwargs):
         if not self.pk:  # New instance
@@ -984,29 +943,13 @@ class PremiumPayment(models.Model):
         self.gsv_value = self.calculate_gsv()
         self.ssv_value = self.calculate_ssv()
         super().save(*args, **kwargs)
-
-    def get_mortality_rate(self):
-        """Fetch mortality rate for the policyholder."""
-        age = self.policy_holder.age
-        company = self.policy_holder.company
-
-        try:
-            mortality_rate = MortalityRate.objects.get(
-                age_group_start__lte=age,
-                age_group_end__gte=age
-            )
-            return mortality_rate.rate
-        except MortalityRate.DoesNotExist:
-            raise ValidationError(f"No mortality rate found for age {age}.")
-
     class Meta:
         verbose_name = "Premium Payment"
         verbose_name_plural = "Premium Payments"
-
+    
     def __str__(self):
-        return f"Premium Payment - {self.policy_holder.first_name} {self.policy_holder.last_name} ({self.payment_status})"
+       return f"Premium Payment - {self.policy_holder.first_name} {self.policy_holder.last_name} ({self.payment_status})"
 
-        
         
 # Agent Report
 class AgentReport(models.Model):
