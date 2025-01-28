@@ -862,29 +862,32 @@ class PremiumPayment(models.Model):
 
     def calculate_ssv(self):
         """Calculate Special Surrender Value (SSV)."""
-        try:
-            duration_years = (date.today() - self.policy_holder.start_date).days // 365
-            premiums_paid = self.policy_holder.premium_payments.count()
+        if self.policy_holder.policy.policy_type != "Endowment":
+            return Decimal(0)  # SSV only applies to endowment policie
+        else:    
+            try:
+                duration_years = (date.today() - self.policy_holder.start_date).days // 365
+                premiums_paid = self.policy_holder.premium_payments.count()
 
-            # Get applicable SSV configuration
-            applicable_range = self.policy_holder.policy.ssv_configs.filter(
-                min_year__lte=duration_years, max_year__gte=duration_years
-            ).first()
+                # Get applicable SSV configuration
+                applicable_range = self.policy_holder.policy.ssv_configs.filter(
+                    min_year__lte=duration_years, max_year__gte=duration_years
+                ).first()
 
-            if not applicable_range or premiums_paid < applicable_range.eligibility_years:
-                return Decimal('0.00')
+                if not applicable_range or premiums_paid < applicable_range.eligibility_years:
+                    return Decimal('0.00')
 
-            # Total Bonuses
-            total_bonuses = self.policy_holder.bonuses.aggregate(
-                total=Sum('accrued_amount'))['total'] or Decimal('0.00')
+                # Total Bonuses
+                total_bonuses = self.policy_holder.bonuses.aggregate(
+                    total=Sum('accrued_amount'))['total'] or Decimal('0.00')
 
-            # Calculate SSV
-            premium_component = self.total_paid * (applicable_range.ssv_factor / Decimal(100))
-            ssv = premium_component + total_bonuses
+                # Calculate SSV
+                premium_component = self.total_paid * (applicable_range.ssv_factor / Decimal(100))
+                ssv = premium_component + total_bonuses
 
-            return ssv.quantize(Decimal('1.00'))
-        except Exception as e:
-            raise ValidationError(f"Error calculating SSV: {e}")
+                return ssv.quantize(Decimal('1.00'))
+            except Exception as e:
+                raise ValidationError(f"Error calculating SSV: {e}")
 
     def save(self, *args, **kwargs):
         if not self.pk:  # New instance
