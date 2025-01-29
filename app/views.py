@@ -587,6 +587,9 @@ def markPaymentAsPaid(request, payment_id):
     payment.save()
     return Response(PremiumPaymentSerializer(payment).data)
 
+
+
+# html api view
 @staff_member_required
 def fetch_policyholder_data(request, policy_number):
     print(f"Received policy_number: {policy_number}")  # Debug log
@@ -627,18 +630,17 @@ def is_superuser(user):
     return user.is_superuser
 
 @login_required
-@user_passes_test(is_superuser)
 def dashboard_view(request):
-    """View for displaying the dashboard."""
-    company_report = Dashboard.get_company_report()
-    branch_reports = Dashboard.get_branch_reports()
-    sales_agent_reports = Dashboard.get_sales_agent_reports()
-
+    """View for displaying the dashboard based on user permissions."""
+    dashboard = Dashboard(request.user)
+    
     context = {
         **site.each_context(request),
         'title': 'Dashboard',
-        'branch_reports': branch_reports,
-        'company_report': company_report,
-        'sales_agent_reports': sales_agent_reports,
+        'branch_reports': dashboard.get_branch_reports(),
+        'company_report': dashboard.get_company_report(),
+        'sales_agent_reports': dashboard.get_sales_agent_reports(),
+        'is_branch_view': not request.user.is_superuser,
+        'user_branch': getattr(request.user, 'branch', None),
     }
     return render(request, 'dashboard.html', context)
