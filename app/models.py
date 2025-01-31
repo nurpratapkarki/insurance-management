@@ -9,6 +9,9 @@ from django.db.models import Sum
 from django.db.models import Sum, Avg, Count, F
 from typing import Dict, Union
 from django.dispatch import receiver
+import logging
+
+logger = logging.getLogger(__name__)
 from .constants import (
     GENDER_CHOICES,
     POLICY_TYPES,
@@ -41,9 +44,9 @@ class Occupation(models.Model):
     
 class MortalityRate(models.Model):
     
-    age_group_start = models.PositiveIntegerField()
-    age_group_end = models.PositiveIntegerField()
-    rate = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
+    age_group_start = models.PositiveIntegerField(null = True, blank= True)
+    age_group_end = models.PositiveIntegerField(null = True, blank= True)
+    rate = models.DecimalField(max_digits=5, decimal_places=2, default=0.00, null = True, blank= True)
 
     class Meta:
         unique_together = ( 'age_group_start', 'age_group_end')
@@ -145,11 +148,23 @@ class GSVRate(models.Model):
         if self.min_year >= self.max_year:
             raise ValidationError("Minimum year must be less than maximum year.")
 
-        overlapping = GSVRate.objects.filter(
-            policy=self.policy,
-            min_year__lte=self.max_year,
-            max_year__gte=self.min_year
+    
+
+        # Get all existing ranges for the policy
+        existing_ranges = GSVRate.objects.filter(
+            policy=self.policy
         ).exclude(pk=self.pk)  # Exclude the current instance
+
+
+        # Check for overlaps using strict inequality for ranges
+        overlapping = existing_ranges.filter(
+            models.Q(
+                # New range starts strictly before existing range ends
+                min_year__lt=self.max_year,
+                # AND existing range ends strictly after new range starts
+                max_year__gt=self.min_year
+            )
+        )
 
         if overlapping.exists():
             raise ValidationError("GSV year ranges cannot overlap for the same policy.")
@@ -305,6 +320,7 @@ class DurationFactor(models.Model):
     def clean(self):
         if self.min_duration >= self.max_duration:
             raise ValidationError("Minimum duration must be less than maximum duration")
+        
 
         overlapping = DurationFactor.objects.filter(
             policy_type=self.policy_type,
@@ -523,16 +539,43 @@ class PolicyHolder(models.Model):
             models.Index(fields=['policy']),
         ]        
 #policy holders end
-# Bonus Rate model
-class BonusRate(models.Model):
-    year = models.PositiveIntegerField(unique=True, help_text="Year the bonus rate applies to.")
-    bonus_rate = models.DecimalField(max_digits=5, decimal_places=2, help_text="Bonus rate as a percentage.")
 
-    def __str__(self):
-        return f"Bonus Rate for {self.year}: {self.bonus_rate}%"
+
+# Bonus Rate model
+
+class BonusRate(models.Model):
+    year = models.PositiveIntegerField(
+        default=date.today().year,  # ✅ Default to current year
+        help_text="Year the bonus rate applies to"
+    )
+    policy_type = models.CharField(
+        max_length=50,
+        choices=POLICY_TYPES, default= 'Term', # Ensure POLICY_TYPES is defined
+        help_text="Applicable policy type"
+    )
+    min_year = models.PositiveIntegerField(help_text="Minimum policy duration in years", default=1)
+    max_year = models.PositiveIntegerField(help_text="Maximum policy duration in years" , default=9)
+    bonus_per_thousand = models.DecimalField(
+        max_digits=5, decimal_places=2,
+        help_text="Bonus amount per 1000 of sum assured", default=0.00
+    )
 
     class Meta:
-        ordering = ['-year']
+        unique_together = ['policy_type', 'min_year', 'max_year']
+        ordering = ['policy_type', 'min_year']
+
+    def __str__(self):
+        return f"{self.policy_type}: {self.min_year}-{self.max_year} years -> {self.bonus_per_thousand} per 1000"
+
+    @classmethod
+    def get_bonus_rate(cls, policy_type, duration):
+        """Fetch the correct bonus rate based on policy type and duration."""
+        return cls.objects.filter(
+            policy_type=policy_type,
+            min_year__lte=duration,
+            max_year__gte=duration
+        ).first()
+
 
 #Bonus Model
 class Bonus(models.Model):
@@ -547,18 +590,25 @@ class Bonus(models.Model):
     last_updated = models.DateField(auto_now=True)
 
     def calculate_bonus(self):
-        """Calculate bonus based on the current year's rate and interest type."""
+        """Calculate yearly bonus based on policy type, duration, and sum assured."""
         try:
-            current_rate = BonusRate.objects.get(year=date.today().year).bonus_rate
-        except BonusRate.DoesNotExist:
-            raise ValueError("No bonus rate defined for the current year.")
+            policy = self.policy_holder.policy
+            duration = self.policy_holder.duration_years
+            sum_assured = self.policy_holder.sum_assured
+            current_year = date.today().year
 
-        duration_years = (date.today() - self.start_date).days // 365
-        if self.bonus_type == 'SI':
-            return self.policy_holder.sum_assured * (current_rate / 100) * duration_years
-        elif self.bonus_type == 'CI':
-            principal = self.policy_holder.sum_assured
-            return principal * ((1 + (current_rate / 100)) ** duration_years - 1)
+            # Fetch applicable bonus rate for the current year
+            bonus_rate_obj = BonusRate.get_bonus_rate(policy.policy_type, duration, current_year)
+            if not bonus_rate_obj:
+                return Decimal(0)  # No bonus if rate is not defined
+
+            bonus_per_1000 = Decimal(bonus_rate_obj.bonus_per_thousand)
+            total_bonus = (sum_assured / Decimal(1000)) * bonus_per_1000
+
+            return total_bonus.quantize(Decimal('1.00'))
+
+        except Exception as e:
+            raise ValidationError(f"Error calculating bonus: {e}")
 
     def save(self, *args, **kwargs):
         """Recalculate and save accrued bonus."""
@@ -566,10 +616,9 @@ class Bonus(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"Bonus {self.bonus_type} for {self.policy_holder.first_name} {self.policy_holder.last_name}"
-    class Meta:
-        verbose_name = "Bonus"
-        verbose_name_plural = "Bonuses"
+        return f"Bonus {self.bonus_type} for {self.policy_holder.first_name} {self.policy_holder.last_name} ({self.accrued_amount})"
+
+
 
 # claim requestes
 
@@ -806,44 +855,64 @@ class PremiumPayment(models.Model):
             policy = self.policy_holder.policy
             sum_assured = self.policy_holder.sum_assured
             duration_years = self.policy_holder.duration_years
+            age = self.policy_holder.age  # Ensure this field exists in PolicyHolder
 
-            if not policy or not sum_assured:
-                raise ValidationError("Policy and Sum Assured are required for premium calculation.")
+            if not policy or not sum_assured or not age:
+                raise ValidationError("Policy, Sum Assured, and Age are required for premium calculation.")
 
-            # Base premium logic
-            mortality_rate = self.get_mortality_rate()
-            if not mortality_rate:
-                raise ValidationError("No valid mortality rate found for the policyholder's age.")
+            # Fetch mortality rate based on age range
+            mortality_rate_obj = MortalityRate.objects.filter(
+                age_group_start__lte=age,  
+                age_group_end__gte=age  
+            ).first()
 
-            base_premium = (sum_assured * Decimal(mortality_rate)) / Decimal(100)
+            if not mortality_rate_obj:
+                return Decimal('0.00'), Decimal('0.00')  # Instead of returning None
 
-            # Adjust premium based on policy type and duration factor
-            duration_factor = self.get_duration_factor()
-            if policy.policy_type == "Endowment":
-                adjusted_premium = base_premium * policy.base_multiplier * duration_factor
+            mortality_rate = Decimal(mortality_rate_obj.rate)
+
+            # Base premium calculation
+            base_premium = (sum_assured * mortality_rate) / Decimal(100)
+
+            # Fetch duration factor
+            duration_factor_obj = DurationFactor.objects.filter(
+                min_duration__lte=duration_years,  
+                max_duration__gte=duration_years  
+            ).first()
+
+            if not duration_factor_obj:
+                return Decimal('0.00'), Decimal('0.00')  # Instead of returning None
+
+            duration_factor = Decimal(duration_factor_obj.factor)  # Ensure it's a Decimal
+
+            # Adjust premium based on policy type
+            if policy.policy_type == "Endownment":
+                adjusted_premium = base_premium * Decimal(policy.base_multiplier) * duration_factor
             elif policy.policy_type == "Term":
                 adjusted_premium = base_premium
             else:
                 raise ValidationError(f"Unsupported policy type: {policy.policy_type}")
 
-            # Add ADB/PTD charges
+            # Add ADB/PTD charges if applicable
             adb_charge = (sum_assured * Decimal(policy.adb_percentage)) / Decimal(100) if policy.include_adb else Decimal('0.00')
             ptd_charge = (sum_assured * Decimal(policy.ptd_percentage)) / Decimal(100) if policy.include_ptd else Decimal('0.00')
 
             annual_premium = adjusted_premium + adb_charge + ptd_charge
 
-            # Calculate interval payment
+            # Calculate interval payments
             interval_mapping = {"quarterly": 4, "semi_annual": 2, "annual": 1, "Single": 1}
             interval_count = interval_mapping.get(self.policy_holder.payment_interval, 1)
             interval_payment = annual_premium / Decimal(interval_count)
 
-            # Set calculated values
-            self.annual_premium = annual_premium.quantize(Decimal('1.00'))
-            self.interval_payment = interval_payment.quantize(Decimal('1.00'))
-            self.total_premium = annual_premium * Decimal(duration_years)
+            return annual_premium.quantize(Decimal('1.00')), interval_payment.quantize(Decimal('1.00'))
+
         except ValidationError as e:
             raise ValidationError(f"Error calculating premium: {e}")
 
+        return Decimal('0.00'), Decimal('0.00')  # Always return a tuple, even if an error occurs
+
+        
+        
     def calculate_gsv(self):
         """Calculate Guaranteed Surrender Value (GSV)."""
         try:

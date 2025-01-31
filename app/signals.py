@@ -1,9 +1,10 @@
-from django.db.models.signals import post_save, pre_delete
+from django.db.models.signals import post_save, pre_delete,pre_save
 from django.dispatch import receiver
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from decimal import Decimal
 from datetime import date
+from django.utils import timezone
 from django.contrib.auth.models import User
 from .models import (
     PolicyHolder, 
@@ -138,32 +139,111 @@ def update_policy_holder_payment_status(sender, instance, **kwargs):
     except Exception as e:
         print(f"Error updating payment status: {str(e)}")
 
+# Signal for new PolicyHolder creation
+@receiver(post_save, sender=PolicyHolder)
+def update_agent_stats_on_new_policy(sender, instance, created, **kwargs):
+    """Update agent statistics when a new policy is created"""
+    if created and instance.agent:
+        with transaction.atomic():
+            agent = instance.agent
+            
+            # Update agent's total policies
+            agent.total_policies_sold += 1
+            agent.last_policy_date = timezone.now().date()
+            agent.save()
+
+            # Create or update the monthly report
+            report_date = timezone.now().date()
+            report, created = AgentReport.objects.get_or_create(
+                agent=agent,
+                branch=agent.branch,
+                report_date=report_date.replace(day=1),  # First day of current month
+                defaults={
+                    'reporting_period': f"{report_date.year}-{report_date.month}",
+                    'policies_sold': 0,
+                    'total_premium': Decimal('0.00'),
+                    'commission_earned': Decimal('0.00'),
+                    'target_achievement': Decimal('0.00'),
+                    'renewal_rate': Decimal('0.00'),
+                    'customer_retention': Decimal('0.00'),
+                }
+            )
+            
+            report.policies_sold += 1
+            report.save()
+
 @receiver(post_save, sender=PremiumPayment)
-def update_agent_report(sender, instance, **kwargs):
-    """Update or create AgentReport based on PremiumPayment updates."""
+def update_agent_report_and_commission(sender, instance, created, **kwargs):
+    """Update agent report and commission when a premium payment is made"""
+    if not instance.policy_holder.agent:
+        return
+
     try:
-        if not instance.policy_holder.agent:
-            return
+        with transaction.atomic():
+            agent = instance.policy_holder.agent
+            report_date = instance.next_payment_date or timezone.now().date()
+            
+            # Get or create monthly report
+            report, created = AgentReport.objects.get_or_create(
+                agent=agent,
+                branch=agent.branch,
+                report_date=report_date.replace(day=1),  # First day of current month
+                defaults={
+                    'reporting_period': f"{report_date.year}-{report_date.month}",
+                    'policies_sold': 0,
+                    'total_premium': Decimal('0.00'),
+                    'commission_earned': Decimal('0.00'),
+                    'target_achievement': Decimal('0.00'),
+                    'renewal_rate': Decimal('0.00'),
+                    'customer_retention': Decimal('0.00'),
+                }
+            )
 
-        agent = instance.policy_holder.agent
-        report, created = AgentReport.objects.get_or_create(
-            agent=agent,
-            branch=agent.branch,
-            report_date=instance.next_payment_date,
-            defaults={
-                'policies_sold': 0,
-                'total_premium': Decimal('0.00'),
-                'commission_earned': Decimal('0.00'),
-            }
-        )
+            if created:
+                # New premium payment
+                commission = (instance.interval_payment * agent.commission_rate / 100)
+                
+                # Update report
+                report.total_premium += instance.interval_payment
+                report.commission_earned += commission
+                
+                # Update agent's total premium collected
+                agent.total_premium_collected += instance.interval_payment
+                agent.save()
+                
+            # Calculate target achievement (assuming monthly target is stored somewhere)
+            # This is a placeholder - adjust according to your target logic
+            if hasattr(agent, 'monthly_target'):
+                report.target_achievement = (report.total_premium / agent.monthly_target) * 100
+                
+            # Calculate renewal rate (if applicable)
+            # This is a placeholder - adjust according to your renewal logic
+            total_policies = PolicyHolder.objects.filter(agent=agent).count()
+            renewed_policies = PolicyHolder.objects.filter(
+                agent=agent,
+                status='ACTIVE',
+                maturity_date__gte=report_date  
+            ).count()
 
-        # Update report statistics
-        report.total_premium += instance.interval_payment
-        report.policies_sold = report.policies_sold + 1 if created else report.policies_sold
-        report.commission_earned += (instance.interval_payment * agent.commission_rate / 100)
-        report.save()
+
+            
+            if total_policies > 0:
+                report.renewal_rate = (renewed_policies / total_policies) * 100
+            report.save()
+            
     except Exception as e:
-        print(f"Error in update_agent_report signal: {str(e)}")
+        print(f"Error in update_agent_report_and_commission signal: {str(e)}")
+        raise
+
+# # Optional: Add a pre_save signal to validate premium payments
+# @receiver(pre_save, sender=PremiumPayment)
+# def validate_premium_payment(sender, instance, **kwargs):
+#     """Validate premium payment before saving"""
+#     if instance.interval_payment <= 0:
+#         raise ValueError("Premium payment amount must be greater than zero")
+    
+#     if not instance.policy_holder:
+#         raise ValueError("Premium payment must be associated with a policy holder")
 
     #  Add signal to handle agent application approval
 @receiver(post_save, sender=AgentApplication)

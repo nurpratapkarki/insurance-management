@@ -4,11 +4,12 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.shortcuts import get_object_or_404
 from django.db.models import Q, Prefetch
+from django.contrib import messages
 from datetime import datetime
 from django.core.exceptions import ValidationError
 from .serializers import *
 from .models import *
-from .frontend_data import Dashboard
+from .frontend_data import Dashboard, MortalityRateGeneratorForm, MortalityRateBulkForm
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.admin.views.decorators import staff_member_required
 from django.shortcuts import render
@@ -644,3 +645,39 @@ def dashboard_view(request):
         'user_branch': getattr(request.user, 'branch', None),
     }
     return render(request, 'dashboard.html', context)
+
+def manage_mortality_rates(request):
+    generator_form = MortalityRateGeneratorForm(request.POST or None)
+    bulk_form = None
+    age_ranges = None
+
+    if request.method == 'POST':
+        if 'generate' in request.POST and generator_form.is_valid():
+            age_ranges = generator_form.generate_ranges()
+            bulk_form = MortalityRateBulkForm(age_ranges=age_ranges)
+        
+        elif 'save' in request.POST and 'age_ranges' in request.session:
+            age_ranges = request.session['age_ranges']
+            bulk_form = MortalityRateBulkForm(request.POST, age_ranges=age_ranges)
+            
+            if bulk_form.is_valid():
+                try:
+                    # Clear existing rates if needed
+                    MortalityRate.objects.all().delete()
+                    
+                    # Create new rates
+                    for i, range_data in enumerate(age_ranges):
+                        rate_value = bulk_form.cleaned_data[f'rate_{i}']
+                        MortalityRate.objects.create(
+                            age_group_start=range_data['start'],
+                            age_group_end=range_data['end'],
+                            rate=rate_value
+                        )
+                    messages.success(request, 'Mortality rates have been updated successfully.')
+                    return redirect('admin:index')
+                except Exception as e:
+                    messages.error(request, f'Error saving rates: {str(e)}')
+
+    if age_ranges:
+        request.session['age_ranges'] = age_ranges
+    

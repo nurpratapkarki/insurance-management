@@ -5,9 +5,16 @@ from django.contrib import messages
 from datetime import date
 from django.core.exceptions import ValidationError
 from django import forms
+from django.urls import reverse
+from django.utils.html import format_html
+from django.shortcuts import render, redirect
+from django.http import HttpResponseRedirect
+from django.urls import path
 from decimal import Decimal
 from django.db.models import Sum
+from .views import manage_mortality_rates  
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from .frontend_data import *
 from .models import (
     InsurancePolicy, SalesAgent, PolicyHolder, Underwriting,
     ClaimRequest, ClaimProcessing, PremiumPayment,MortalityRate,
@@ -91,11 +98,10 @@ class InsurancePolicyAdmin(admin.ModelAdmin):
 #Bonus Rate Admin
 @admin.register(BonusRate)
 class BonusRateAdmin(admin.ModelAdmin):
-    list_display = ('year', 'bonus_rate')
-    ordering = ['-year']
-    search_fields = ('year',)
-
-
+    list_display = ('year', 'policy_type', 'min_year', 'max_year', 'bonus_per_thousand')
+    ordering = ['year', 'policy_type', 'min_year']
+    search_fields = ('year', 'policy_type')
+    list_filter = ('year', 'policy_type')
 
 class AgentReportInline(admin.TabularInline):
     model = AgentReport
@@ -474,9 +480,157 @@ class AgentApplicationAdmin(BranchFilterMixin,admin.ModelAdmin):
         
 @admin.register(MortalityRate)
 class MortalityRateAdmin(admin.ModelAdmin):
-    list_display = ( 'age_group_start', 'age_group_end', 'rate')
-    search_fields = ('company__name',)
+    list_display = ('age_range_display', 'rate', 'edit_button')
+    search_fields = ('age_group_start', 'age_group_end')
+    change_list_template = "mortalityrate/mortality_changelist.html"
+    change_form_template = "mortalityrate/mortality_from.html"
+    
+    #changelist view
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        
+        # Get all mortality rates for the chart
+        rates = MortalityRate.objects.all().order_by('age_group_start')
+        age_ranges = [f"{rate.age_group_start}-{rate.age_group_end}" for rate in rates]
+        rate_values = [float(rate.rate) for rate in rates]
+        
+        extra_context.update({
+            'age_ranges': age_ranges,
+            'rates': rate_values,
+        })
+        
+        return super().changelist_view(request, extra_context=extra_context)
+    # change view
+    def change_view(self, request, object_id, form_url='', extra_context=None):
+        extra_context = extra_context or {}
+        obj = self.get_object(request, object_id)
+        
+        if obj:
+            # Get all mortality rates for the chart
+            rates = MortalityRate.objects.all().order_by('age_group_start')
+            age_ranges = [f"{rate.age_group_start}-{rate.age_group_end}" for rate in rates]
+            rate_values = [float(rate.rate) for rate in rates]
+            
+            extra_context.update({
+                'age_ranges': age_ranges,
+                'rates': rate_values,
+                'show_chart': True
+            })
+            
+            # For edit view
+            ModelForm = self.get_form(request, obj)
+            form = ModelForm(instance=obj)
+            
+            extra_context.update({
+                'form': form,
+                'original': obj,
+                'show_save': True,
+                'show_save_and_continue': True,
+            })
+            
+        return super().change_view(request, object_id, form_url, extra_context)
+    def age_range_display(self, obj):
+        return f"{obj.age_group_start}-{obj.age_group_end}"
+    age_range_display.short_description = "Age Range"
 
+    def edit_button(self, obj):
+        return format_html(
+            '<a class="button btn btn-warning btn-sm" href="{}">Edit</a>',
+            reverse('admin:app_mortalityrate_change', args=[obj.pk])
+        )
+    edit_button.short_description = 'Edit'
+
+    def add_view(self, request, form_url='', extra_context=None):
+        ModelForm = self.get_form(request)
+        form = ModelForm()
+        
+        if request.method == 'POST':
+            if 'generate' in request.POST:
+                generator_form = MortalityRateGeneratorForm(request.POST)
+                if generator_form.is_valid():
+                    step = generator_form.cleaned_data['step_size']
+                    max_age = generator_form.cleaned_data['max_age']
+                    
+                    age_ranges = []
+                    for age in range(0, max_age, step):
+                        age_ranges.append({
+                            'start': age,
+                            'end': min(age + step - 1, max_age),
+                            'rate': 0.00
+                        })
+                    
+                    request.session['generated_ranges'] = age_ranges
+                    bulk_form = MortalityRateBulkForm(age_ranges=age_ranges)
+                    
+                    context = {
+                        'form': form,
+                        'generated_ranges': age_ranges,
+                        'bulk_form': bulk_form,
+                        'show_generator': True,
+                        'generator_form': generator_form,
+                        'opts': self.model._meta,
+                        'add': True,
+                        'is_popup': False,
+                        'save_as': False,
+                        'has_delete_permission': False,
+                        'has_add_permission': True,
+                        'has_change_permission': True,
+                        'show_save': True,
+                        'show_save_and_continue': True,
+                    }
+                    return render(
+                        request,
+                        self.change_form_template or [
+                            f"admin/{self.model._meta.app_label}/{self.model._meta.model_name}/change_form.html",
+                            "admin/change_form.html",
+                        ],
+                        context,
+                    )
+            
+            elif 'save_rates' in request.POST:
+                age_ranges = request.session.get('generated_ranges', [])
+                bulk_form = MortalityRateBulkForm(request.POST, age_ranges=age_ranges)
+                
+                if bulk_form.is_valid():
+                    try:
+                        for i, range_data in enumerate(age_ranges):
+                            rate_value = bulk_form.cleaned_data[f'rate_{i}']
+                            MortalityRate.objects.create(
+                                age_group_start=range_data['start'],
+                                age_group_end=range_data['end'],
+                                rate=rate_value
+                            )
+                        messages.success(request, 'Mortality rates created successfully.')
+                        return HttpResponseRedirect(
+                            reverse('admin:app_mortalityrate_changelist')
+                        )
+                    except Exception as e:
+                        messages.error(request, f'Error saving rates: {str(e)}')
+
+        # Default behavior for GET requests
+        generator_form = MortalityRateGeneratorForm()
+        context = {
+            'form': form,
+            'generator_form': generator_form,
+            'show_generator': True,
+            'opts': self.model._meta,
+            'add': True,
+            'is_popup': False,
+            'save_as': False,
+            'has_delete_permission': False,
+            'has_add_permission': True,
+            'has_change_permission': True,
+            'show_save': True,
+            'show_save_and_continue': True,
+        }
+        return render(
+            request,
+            self.change_form_template or [
+                f"admin/{self.model._meta.app_label}/{self.model._meta.model_name}/change_form.html",
+                "admin/change_form.html",
+            ],
+            context,
+        )
 
 #Loan Admin
 @admin.register(Loan)

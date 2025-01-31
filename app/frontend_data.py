@@ -2,6 +2,8 @@
 from .models import *
 from django.db.models import Sum
 from datetime import date
+from django import forms
+from django.core.exceptions import ValidationError
 
 class Dashboard:
     """
@@ -80,3 +82,32 @@ class Dashboard:
         return agent_data
 
 
+class MortalityRateGeneratorForm(forms.Form):
+    step_size = forms.IntegerField(
+        min_value=1,
+        max_value=10,
+        initial=5,
+        label="Age Range Step Size",
+        help_text="Number of years in each age group"
+    )
+    max_age = forms.IntegerField(
+        min_value=1,
+        max_value=120,
+        initial=100,
+        label="Maximum Age",
+        help_text="Maximum age to generate rates for"
+    )
+
+class MortalityRateBulkForm(forms.Form):
+    def __init__(self, *args, age_ranges=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if age_ranges:
+            for i, range_data in enumerate(age_ranges):
+                field_name = f'rate_{i}'
+                self.fields[field_name] = forms.DecimalField(
+                    max_digits=5,
+                    decimal_places=2,
+                    initial=range_data.get('rate', 0.00),
+                    label=f"{range_data['start']}-{range_data['end']} years",
+                    help_text="Rate as percentage"
+                )

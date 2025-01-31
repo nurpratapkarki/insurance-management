@@ -74,5 +74,6 @@ urlpatterns = [
     path('policyholder-data/<int:policy_number>/', views.fetch_policyholder_data, name='fetch_policyholder_data'),
     path('holder/', views.get_policy_holders, name='get_policy_holders'),
     path('dashboard/', dashboard_view, name='dashboard'),
+    path('manage-mortality-rates/', views.manage_mortality_rates, name='manage_mortality_rates'),
 
 ]

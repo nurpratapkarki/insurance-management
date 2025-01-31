@@ -1,0 +1,64 @@
+{% extends "admin/change_list.html" %}
+{% load static %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
+{% endblock %}
+
+{% block content %}
+    {{ block.super }}
+    
+    {% if age_ranges %}
+    <div class="card mt-4">
+        <div class="card-header">
+            <h3 class="card-title">Mortality Rate Visualization</h3>
+        </div>
+        <div class="card-body">
+            <canvas id="rateChart" style="height: 400px;"></canvas>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const ctx = document.getElementById('rateChart').getContext('2d');
+        const labels = [{% for range in age_ranges %}"{{ range }}",{% endfor %}];
+        const rates = [{% for rate in rates %}{{ rate }},{% endfor %}];
+
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Mortality Rate (%)',
+                    data: rates,
+                    borderColor: '#3498db',
+                    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                    tension: 0.1,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Rate (%)'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Age Range'
+                        }
+                    }
+                }
+            }
+        });
+    });
+    </script>
+    {% endif %}
+{% endblock %}

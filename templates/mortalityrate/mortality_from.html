@@ -1,0 +1,137 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static admin_modify %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    {% if show_generator %}
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Generate Mortality Rates</h3>
+            </div>
+            <div class="card-body">
+                <form method="post" class="form-horizontal">
+                    {% csrf_token %}
+                    {{ generator_form.as_p }}
+                    <div class="form-actions mt-3">
+                        <button type="submit" name="generate" class="btn btn-primary">Generate Ranges</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    {% endif %}
+
+    {% if bulk_form %}
+        <div class="card mt-4">
+            <div class="card-header">
+                <h3 class="card-title">Enter Mortality Rates</h3>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="table-responsive">
+                        <table class="table table-bordered table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Age Range</th>
+                                    <th>Rate (%)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for field in bulk_form %}
+                                <tr>
+                                    <td>{{ field.label }}</td>
+                                    <td>
+                                        {{ field }}
+                                        {% if field.errors %}
+                                        <span class="text-danger">{{ field.errors }}</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="form-actions mt-3">
+                        <button type="submit" name="save_rates" class="btn btn-success">Save Rates</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    {% endif %}
+
+    {% if original %} {# This means we're in edit mode #}
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Edit Mortality Rate</h3>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    {{ form.as_p }}
+                    <div class="form-actions mt-3">
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    {% endif %}
+
+    {% if show_chart and age_ranges %}
+        <div class="card mt-4">
+            <div class="card-header">
+                <h3 class="card-title">Mortality Rate Visualization</h3>
+            </div>
+            <div class="card-body">
+                <canvas id="rateChart" style="height: 400px;"></canvas>
+            </div>
+        </div>
+
+        <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const ctx = document.getElementById('rateChart').getContext('2d');
+            const labels = [{% for range in age_ranges %}"{{ range }}",{% endfor %}];
+            const rates = [{% for rate in rates %}{{ rate }},{% endfor %}];
+
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Mortality Rate (%)',
+                        data: rates,
+                        borderColor: '#3498db',
+                        backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Rate (%)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Age Range'
+                            }
+                        }
+                    }
+                }
+            });
+        });
+        </script>
+    {% endif %}
+</div>
+{% endblock %}

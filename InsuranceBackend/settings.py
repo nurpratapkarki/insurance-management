@@ -248,3 +248,18 @@ JAZZMIN_UI_TWEAKS = {
     "theme": "lumen",
     # "dark_mode_theme": "cyborg",
 }
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        '': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+        },
+    },
+}
