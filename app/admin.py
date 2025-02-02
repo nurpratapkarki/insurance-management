@@ -11,6 +11,7 @@ from django.shortcuts import render, redirect
 from django.http import HttpResponseRedirect
 from django.urls import path
 from decimal import Decimal
+from django.contrib.admin import site
 from django.db.models import Sum
 from .views import manage_mortality_rates  
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
@@ -147,7 +148,7 @@ class BonusAdmin(admin.ModelAdmin):
 class BonusInline(admin.TabularInline):
     model = Bonus
     extra = 0
-    readonly_fields = ('bonus_type', 'accrued_amount', 'start_date', 'last_updated', 'total_bonus_accrued')
+    readonly_fields = ( 'accrued_amount', 'start_date', 'last_updated', 'total_bonus_accrued')
 
     def total_bonus_accrued(self, obj):
         """Calculate the total bonus accrued for the policyholder."""
@@ -477,6 +478,7 @@ class AgentApplicationAdmin(BranchFilterMixin,admin.ModelAdmin):
         if not change and not request.user.is_superuser:
             obj.branch = getattr(request.user.profile, 'branch', None)
         super().save_model(request, obj, form, change)
+    
         
 @admin.register(MortalityRate)
 class MortalityRateAdmin(admin.ModelAdmin):
@@ -570,6 +572,7 @@ class MortalityRateAdmin(admin.ModelAdmin):
                         'generator_form': generator_form,
                         'opts': self.model._meta,
                         'add': True,
+                        **site.each_context(request),
                         'is_popup': False,
                         'save_as': False,
                         'has_delete_permission': False,
@@ -615,6 +618,7 @@ class MortalityRateAdmin(admin.ModelAdmin):
             'show_generator': True,
             'opts': self.model._meta,
             'add': True,
+            **site.each_context(request),
             'is_popup': False,
             'save_as': False,
             'has_delete_permission': False,
@@ -631,6 +635,8 @@ class MortalityRateAdmin(admin.ModelAdmin):
             ],
             context,
         )
+
+
 
 #Loan Admin
 @admin.register(Loan)

@@ -308,7 +308,6 @@ def trigger_bonus_on_anniversary(sender, instance, **kwargs):
             try:
                 Bonus.objects.create(
                     policy_holder=instance,
-                    bonus_type='SI',  # Assuming Simple Interest as default
                     start_date=today
                 )
             except ValueError as e:

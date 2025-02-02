@@ -1,0 +1,235 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+    @page {
+        size: A4;
+        margin: 2cm;
+    }
+
+    .print-container {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        font-family: Arial, sans-serif;
+    }
+
+    .print-header {
+        text-align: center;
+        margin-bottom: 30px;
+        padding-bottom: 20px;
+        border-bottom: 2px solid #333;
+    }
+
+    .company-logo {
+        max-width: 200px;
+        margin-bottom: 15px;
+    }
+
+    .policy-number {
+        font-size: 1.2em;
+        color: #666;
+        margin-top: 10px;
+    }
+
+    .section {
+        margin-bottom: 30px;
+    }
+
+    .section-title {
+        background: #f5f5f5;
+        padding: 10px;
+        margin-bottom: 15px;
+        font-weight: bold;
+        border-left: 4px solid #333;
+    }
+
+    .info-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 15px;
+    }
+
+    .info-item {
+        display: flex;
+        margin-bottom: 8px;
+    }
+
+    .info-label {
+        font-weight: bold;
+        min-width: 150px;
+        color: #555;
+    }
+
+    .info-value {
+        flex: 1;
+    }
+
+    .table-section {
+        margin-top: 20px;
+        margin-bottom: 20px;
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 20px;
+    }
+
+    th, td {
+        border: 1px solid #ddd;
+        padding: 8px;
+        text-align: left;
+    }
+
+    th {
+        background-color: #f5f5f5;
+    }
+
+    .footer {
+        margin-top: 50px;
+        padding-top: 20px;
+        border-top: 1px solid #ddd;
+    }
+
+    .signature-section {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 50px;
+    }
+
+    .signature-box {
+        width: 200px;
+        text-align: center;
+    }
+
+    .signature-line {
+        border-top: 1px solid #000;
+        margin-top: 50px;
+        margin-bottom: 10px;
+    }
+
+    @media print {
+        .no-print {
+            display: none;
+        }
+        
+        body {
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="print-container">
+    <div class="no-print">
+        <button onclick="window.print()">Print Policy</button>
+        <button onclick="window.close()">Close</button>
+    </div>
+
+    <div class="print-header">
+        <img src="{{ STATIC_URL }}img/company-logo.png" alt="Company Logo" class="company-logo">
+        <h1>{{ company_name }}</h1>
+        <div class="policy-number">Policy Number: {{ original.policy_number }}</div>
+    </div>
+
+    <div class="section">
+        <h2 class="section-title">Personal Information</h2>
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="info-label">Full Name:</span>
+                <span class="info-value">{{ original.first_name }} {{ original.middle_name }} {{ original.last_name }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Date of Birth:</span>
+                <span class="info-value">{{ original.date_of_birth }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Gender:</span>
+                <span class="info-value">{{ original.gender }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Contact Number:</span>
+                <span class="info-value">{{ original.phone_number }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Occupation:</span>
+                <span class="info-value">{{ original.occupation }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2 class="section-title">Policy Details</h2>
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="info-label">Policy Type:</span>
+                <span class="info-value">{{ original.policy.name }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Sum Assured:</span>
+                <span class="info-value">{{ original.sum_assured }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Premium Amount:</span>
+                <span class="info-value">{{ original.premium_amount }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Policy Term:</span>
+                <span class="info-value">{{ original.duration_years }} Years</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Payment Frequency:</span>
+                <span class="info-value">{{ original.payment_interval }}</span>
+            </div>
+        </div>
+    </div>
+
+    {% if original.bonus_set.exists %}
+    <div class="section">
+        <h2 class="section-title">Bonus Details</h2>
+        <div class="table-section">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Type</th>
+                        <th>Amount</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for bonus in original.bonus_set.all %}
+                    <tr>
+                        <td>{{ bonus.date }}</td>
+                        <td>{{ bonus.bonus_type }}</td>
+                        <td>{{ bonus.amount }}</td>
+                        <td>{{ bonus.description }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="footer">
+        <p>This document is computer generated and does not require a signature.</p>
+        <div class="signature-section">
+            <div class="signature-box">
+                <div class="signature-line"></div>
+                <p>Policy Holder</p>
+            </div>
+            <div class="signature-box">
+                <div class="signature-line"></div>
+                <p>Authorized Signatory</p>
+            </div>
+        </div>
+        <p class="print-date">Printed on: {% now "F j, Y H:i" %}</p>
+    </div>
+</div>
+{% endblock %}

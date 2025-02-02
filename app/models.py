@@ -580,11 +580,6 @@ class BonusRate(models.Model):
 #Bonus Model
 class Bonus(models.Model):
     policy_holder = models.ForeignKey(PolicyHolder, on_delete=models.CASCADE, related_name='bonuses')
-    bonus_type = models.CharField(
-        max_length=20,
-        choices=[('SI', 'Simple Interest'), ('CI', 'Compound Interest')],
-        default='SI'
-    )
     accrued_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
     start_date = models.DateField(help_text="Start date for bonus accrual.")
     last_updated = models.DateField(auto_now=True)
@@ -598,7 +593,7 @@ class Bonus(models.Model):
             current_year = date.today().year
 
             # Fetch applicable bonus rate for the current year
-            bonus_rate_obj = BonusRate.get_bonus_rate(policy.policy_type, duration, current_year)
+            bonus_rate_obj = BonusRate.get_bonus_rate(policy.policy_type, duration, )
             if not bonus_rate_obj:
                 return Decimal(0)  # No bonus if rate is not defined
 
@@ -616,7 +611,7 @@ class Bonus(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"Bonus {self.bonus_type} for {self.policy_holder.first_name} {self.policy_holder.last_name} ({self.accrued_amount})"
+        return f"Bonus  for {self.policy_holder.first_name} {self.policy_holder.last_name} ({self.accrued_amount})"
 
 
 
@@ -872,7 +867,7 @@ class PremiumPayment(models.Model):
             mortality_rate = Decimal(mortality_rate_obj.rate)
 
             # Base premium calculation
-            base_premium = (sum_assured * mortality_rate) / Decimal(100)
+            base_premium = (sum_assured * mortality_rate) / Decimal(1000)
 
             # Fetch duration factor
             duration_factor_obj = DurationFactor.objects.filter(
@@ -881,9 +876,9 @@ class PremiumPayment(models.Model):
             ).first()
 
             if not duration_factor_obj:
-                return Decimal('0.00'), Decimal('0.00')  # Instead of returning None
+                return Decimal('0.00'), Decimal('0.00') 
 
-            duration_factor = Decimal(duration_factor_obj.factor)  # Ensure it's a Decimal
+            duration_factor = Decimal(duration_factor_obj.factor)  
 
             # Adjust premium based on policy type
             if policy.policy_type == "Endownment":
@@ -909,7 +904,7 @@ class PremiumPayment(models.Model):
         except ValidationError as e:
             raise ValidationError(f"Error calculating premium: {e}")
 
-        return Decimal('0.00'), Decimal('0.00')  # Always return a tuple, even if an error occurs
+        return Decimal('0.00'), Decimal('0.00')  
 
         
         
