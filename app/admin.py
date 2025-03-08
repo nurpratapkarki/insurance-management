@@ -19,7 +19,7 @@ from .frontend_data import *
 from .models import (
     InsurancePolicy, SalesAgent, PolicyHolder, Underwriting,
     ClaimRequest, ClaimProcessing, PremiumPayment,MortalityRate,
-    EmployeePosition, Employee, PaymentProcessing, Branch, Company, AgentReport, AgentApplication, Occupation, DurationFactor, GSVRate, SSVConfig, Bonus, BonusRate, Loan, LoanRepayment,UserProfile
+    EmployeePosition, Employee, PaymentProcessing, Branch, Company, AgentReport, AgentApplication, Occupation, DurationFactor, GSVRate, SSVConfig, Bonus, BonusRate, Loan, LoanRepayment,UserProfile, OTP
 )
 
 
@@ -720,4 +720,13 @@ class CustomUserAdmin(BaseUserAdmin):
             if first_company:
                 obj.profile.company = first_company
                 obj.profile.save()
+
+class OTPAdmin(admin.ModelAdmin):
+    list_display = ('user', 'otp', 'created_at', 'expires_at', 'is_used')
+    search_fields = ('user__username', 'otp')
+    list_filter = ('is_used', 'created_at')
+    readonly_fields = ('created_at', 'expires_at')
+
+# Register models
+admin.site.register(OTP, OTPAdmin)
     

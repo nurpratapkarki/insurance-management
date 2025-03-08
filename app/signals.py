@@ -6,6 +6,7 @@ from decimal import Decimal
 from datetime import date
 from django.utils import timezone
 from django.contrib.auth.models import User
+import logging
 from .models import (
     PolicyHolder, 
     Underwriting, 
@@ -24,13 +25,34 @@ from .models import (
     UserProfile,
     Bonus
 )
+import random
 
-@receiver(post_save, sender=PolicyHolder)
+# Configure logger
+logger = logging.getLogger(__name__)
+
+# Signal dispatch order control with dispatch_uid
+@receiver(post_save, sender=PolicyHolder, dispatch_uid="policy_holder_post_save_handler")
 def policy_holder_post_save(sender, instance, created, **kwargs):
-    """Handle post-save operations for PolicyHolder."""
+    """
+    Master signal handler for all PolicyHolder post-save operations.
+    This ensures operations happen in the correct order within a transaction.
+    """
+    # Skip if this is a signal-triggered save to prevent recursion
+    if getattr(instance, '_skip_signal', False):
+        return
+        
     try:
         with transaction.atomic():
-            # Create PremiumPayment for approved/active policies
+            # Create/update underwriting before premium management
+            if instance.status in ['Pending', 'Active']:
+                underwriting, created = Underwriting.objects.get_or_create(policy_holder=instance)
+                # Update underwriting without triggering recursion
+                if not getattr(underwriting, '_from_signal', False):
+                    underwriting._from_signal = True
+                    underwriting.save()
+                    underwriting._from_signal = False
+            
+            # Create/update premium payment for approved/active policies
             if instance.status in ['Approved', 'Active']:
                 premium, created = PremiumPayment.objects.get_or_create(
                     policy_holder=instance,
@@ -41,40 +63,102 @@ def policy_holder_post_save(sender, instance, created, **kwargs):
                 )
                 if not created:
                     premium.save()  # Ensure calculations are updated
-            
+                
+            # Handle policy maturity date calculation
+            if created or not instance.maturity_date:
+                if instance.start_date and instance.duration_years:
+                    instance._skip_signal = True  # Prevent recursion
+                    instance.calculate_maturity_date()
+                    instance.save(update_fields=['maturity_date'])
+                    instance._skip_signal = False
+                    
+            # Update agent statistics
+            if created and instance.agent:
+                update_agent_stats(instance)
+                
+            # Check for policy anniversary (if not a new policy)
+            if not created and instance.status == 'Active':
+                check_policy_anniversary(instance)
+                
     except Exception as e:
-        print(f"Error in policy_holder_post_save signal: {str(e)}")
+        logger.error(f"Error in policy_holder_post_save for policy ID {instance.id}: {str(e)}")
+        # Don't re-raise to avoid disrupting the user experience
+        # But consider alerting an admin in production
 
+def update_agent_stats(policy_holder):
+    """Extract agent statistics update logic to a separate function for clarity"""
+    try:
+        with transaction.atomic():
+            agent = policy_holder.agent
+            
+            # Update agent's total policies
+            agent.total_policies_sold += 1
+            agent.last_policy_date = timezone.now().date()
+            agent.save()
 
+            # Create or update the monthly report
+            report_date = timezone.now().date()
+            report, created = AgentReport.objects.get_or_create(
+                agent=agent,
+                branch=agent.branch,
+                report_date=report_date.replace(day=1),  # First day of current month
+                defaults={
+                    'reporting_period': f"{report_date.year}-{report_date.month}",
+                    'policies_sold': 0,
+                    'total_premium': Decimal('0.00'),
+                    'commission_earned': Decimal('0.00'),
+                    'target_achievement': Decimal('0.00'),
+                    'renewal_rate': Decimal('0.00'),
+                    'customer_retention': Decimal('0.00'),
+                }
+            )
+            
+            report.policies_sold += 1
+            report.save()
+    except Exception as e:
+        logger.error(f"Error updating agent stats: {str(e)}")
 
-
-@receiver(post_save, sender=PolicyHolder)
-def create_or_update_underwriting(sender, instance, created, **kwargs):
-    """Create or update underwriting for active or pending policyholders."""
-    # Avoid infinite recursion by skipping updates caused by the signal itself
-    if getattr(instance, '_from_signal', False):
-        return
+def check_policy_anniversary(policy_holder):
+    """Check if today is the policy's anniversary for bonus calculation"""
+    today = date.today()
     
-    if instance.status in ['Pending', 'Active']:
-        underwriting, _ = Underwriting.objects.get_or_create(policy_holder=instance)
+    if (policy_holder.start_date.month == today.month and 
+        policy_holder.start_date.day == today.day and
+        policy_holder.status == 'Active'):
+        
+        # Check for existing bonus for the year
+        if not Bonus.objects.filter(
+            policy_holder=policy_holder, 
+            start_date__year=today.year
+        ).exists():
+            try:
+                Bonus.objects.create(
+                    policy_holder=policy_holder,
+                    start_date=today
+                )
+                logger.info(f"Created anniversary bonus for policy {policy_holder.id}")
+            except Exception as e:
+                logger.error(f"Bonus creation failed for policy {policy_holder.id}: {str(e)}")
 
-        # Save underwriting without triggering PolicyHolder updates
-        underwriting._from_signal = True
-        underwriting.save()
-        underwriting._from_signal = False
 @receiver(post_save, sender=Underwriting)
 def update_policy_holder_from_underwriting(sender, instance, **kwargs):
     """Update PolicyHolder's risk category based on Underwriting."""
-    # Skip updates if manual_override is enabled
-    if instance.manual_override:
+    # Skip updates if manual_override is enabled or to prevent recursion
+    if instance.manual_override or getattr(instance, '_from_signal', False):
         return
 
-    policy_holder = instance.policy_holder
+    try:
+        policy_holder = instance.policy_holder
 
-    # Only update if the risk category has changed
-    if policy_holder.risk_category != instance.risk_category:
-        policy_holder.risk_category = instance.risk_category
-        policy_holder.save()
+        # Only update if the risk category has changed
+        if policy_holder.risk_category != instance.risk_category:
+            policy_holder._skip_signal = True  # Prevent recursion
+            policy_holder.risk_category = instance.risk_category
+            policy_holder.save(update_fields=['risk_category'])
+            policy_holder._skip_signal = False
+            logger.info(f"Updated risk category for policy {policy_holder.id} to {instance.risk_category}")
+    except Exception as e:
+        logger.error(f"Error updating policy holder from underwriting: {str(e)}")
         
 @receiver(pre_delete, sender=PolicyHolder)
 def cleanup_policy_holder(sender, instance, **kwargs):
@@ -109,10 +193,10 @@ def cleanup_policy_holder(sender, instance, **kwargs):
                 try:
                     document.delete(save=False)
                 except Exception as e:
-                    print(f"Error deleting {field}: {str(e)}")
+                    logger.error(f"Error deleting {field}: {str(e)}")
                 
     except Exception as e:
-        print(f"Error in cleanup_policy_holder signal: {str(e)}")
+        logger.error(f"Error in cleanup_policy_holder signal: {str(e)}")
 
 @receiver(post_save, sender=PremiumPayment)
 def update_policy_holder_payment_status(sender, instance, **kwargs):
@@ -122,8 +206,12 @@ def update_policy_holder_payment_status(sender, instance, **kwargs):
     try:
         policy_holder = instance.policy_holder
         
+        # Skip if this is a signal-triggered save
+        if getattr(policy_holder, '_skip_signal', False):
+            return
+            
         # Calculate new status based on payment amounts
-        if instance.total_paid >= instance.total_premium_due:
+        if instance.total_paid >= instance.total_premium:
             new_status = 'Paid'
         elif instance.total_paid > 0:
             new_status = 'Partially Paid'
@@ -132,45 +220,15 @@ def update_policy_holder_payment_status(sender, instance, **kwargs):
             
         # Update only if status has changed
         if policy_holder.payment_status != new_status:
+            policy_holder._skip_signal = True
             PolicyHolder.objects.filter(id=policy_holder.id).update(
                 payment_status=new_status
             )
+            policy_holder._skip_signal = False
+            logger.info(f"Updated payment status for policy {policy_holder.id} to {new_status}")
             
     except Exception as e:
-        print(f"Error updating payment status: {str(e)}")
-
-# Signal for new PolicyHolder creation
-@receiver(post_save, sender=PolicyHolder)
-def update_agent_stats_on_new_policy(sender, instance, created, **kwargs):
-    """Update agent statistics when a new policy is created"""
-    if created and instance.agent:
-        with transaction.atomic():
-            agent = instance.agent
-            
-            # Update agent's total policies
-            agent.total_policies_sold += 1
-            agent.last_policy_date = timezone.now().date()
-            agent.save()
-
-            # Create or update the monthly report
-            report_date = timezone.now().date()
-            report, created = AgentReport.objects.get_or_create(
-                agent=agent,
-                branch=agent.branch,
-                report_date=report_date.replace(day=1),  # First day of current month
-                defaults={
-                    'reporting_period': f"{report_date.year}-{report_date.month}",
-                    'policies_sold': 0,
-                    'total_premium': Decimal('0.00'),
-                    'commission_earned': Decimal('0.00'),
-                    'target_achievement': Decimal('0.00'),
-                    'renewal_rate': Decimal('0.00'),
-                    'customer_retention': Decimal('0.00'),
-                }
-            )
-            
-            report.policies_sold += 1
-            report.save()
+        logger.error(f"Error updating payment status: {str(e)}")
 
 @receiver(post_save, sender=PremiumPayment)
 def update_agent_report_and_commission(sender, instance, created, **kwargs):
@@ -199,157 +257,197 @@ def update_agent_report_and_commission(sender, instance, created, **kwargs):
                 }
             )
 
-            if created:
-                # New premium payment
-                commission = (instance.interval_payment * agent.commission_rate / 100)
+            if instance.paid_amount > 0:  # Only process if there's a new payment
+                commission = (instance.paid_amount * agent.commission_rate / 100)
                 
                 # Update report
-                report.total_premium += instance.interval_payment
+                report.total_premium += instance.paid_amount
                 report.commission_earned += commission
                 
                 # Update agent's total premium collected
-                agent.total_premium_collected += instance.interval_payment
+                agent.total_premium_collected += instance.paid_amount
                 agent.save()
                 
+                logger.info(f"Updated agent {agent.id} commission by {commission}")
+                
             # Calculate target achievement (assuming monthly target is stored somewhere)
-            # This is a placeholder - adjust according to your target logic
-            if hasattr(agent, 'monthly_target'):
+            if hasattr(agent, 'monthly_target') and agent.monthly_target:
                 report.target_achievement = (report.total_premium / agent.monthly_target) * 100
                 
             # Calculate renewal rate (if applicable)
-            # This is a placeholder - adjust according to your renewal logic
             total_policies = PolicyHolder.objects.filter(agent=agent).count()
             renewed_policies = PolicyHolder.objects.filter(
                 agent=agent,
-                status='ACTIVE',
+                status='Active',
                 maturity_date__gte=report_date  
             ).count()
-
-
             
             if total_policies > 0:
                 report.renewal_rate = (renewed_policies / total_policies) * 100
             report.save()
             
     except Exception as e:
-        print(f"Error in update_agent_report_and_commission signal: {str(e)}")
-        raise
+        logger.error(f"Error in update_agent_report_and_commission: {str(e)}")
 
-# # Optional: Add a pre_save signal to validate premium payments
-# @receiver(pre_save, sender=PremiumPayment)
-# def validate_premium_payment(sender, instance, **kwargs):
-#     """Validate premium payment before saving"""
-#     if instance.interval_payment <= 0:
-#         raise ValueError("Premium payment amount must be greater than zero")
-    
-#     if not instance.policy_holder:
-#         raise ValueError("Premium payment must be associated with a policy holder")
-
-    #  Add signal to handle agent application approval
 @receiver(post_save, sender=AgentApplication)
 def agent_application_approval(sender, instance, created, **kwargs):
     """Create SalesAgent when application is approved."""
     try:
         if instance.status.upper() == "APPROVED" and not SalesAgent.objects.filter(application=instance).exists():
             agent_code = f"A-{instance.branch.id}-{str(instance.id).zfill(4)}"
-            SalesAgent.objects.create(
+            
+            # Create User for authentication
+            username = instance.phone_number  # Use phone number as username
+            
+            # Check if a user with this username already exists
+            if not User.objects.filter(username=username).exists():
+                # Create new user
+                user = User.objects.create_user(
+                    username=username,
+                    email=instance.email,
+                    password="agent123",  # Default password
+                    first_name=instance.first_name,
+                    last_name=instance.last_name
+                )
+            else:
+                # Get existing user if already exists
+                user = User.objects.get(username=username)
+            
+            # Create SalesAgent and link to User
+            sales_agent = SalesAgent.objects.create(
+                user=user,
                 branch=instance.branch,
                 application=instance,
                 agent_code=agent_code,
                 commission_rate=Decimal('5.00'),  # Default commission rate
                 is_active=True,
                 joining_date=date.today(),
-                status='ACTIVE'
+                status='ACTIVE',
+                phone_number=instance.phone_number,
+                email=instance.email
             )
-    except Exception as e:
-        print(f"Error in agent_application_approval signal: {str(e)}")
-        raise
-
             
+            logger.info(f"Created new sales agent from application {instance.id}")
     except Exception as e:
-        print(f"Error in agent_application_approval signal: {str(e)}")
-        raise  # Re-raise the exception to ensure it's not silently ignored
-
-# Optional: Add signal to handle policy renewal
-@receiver(post_save, sender=PolicyHolder)
-def handle_policy_renewal(sender, instance, **kwargs):
-    """
-    Handle policy renewal processes
-    - Triggered when policy status changes
-    - Creates renewal notices
-    - Updates related records
-    """
-    try:
-        # Check if policy is near maturity (e.g., within 30 days)
-        if instance.maturity_date and instance.status == 'Active':
-            today = date.today()
-            days_to_maturity = (instance.maturity_date - today).days
-            
-            if 0 < days_to_maturity <= 30:
-                # You can add renewal notification logic here
-                pass
-                
-    except Exception as e:
-        print(f"Error in handle_policy_renewal signal: {str(e)}")
-    from django.db.models import Q
-
-@receiver(post_save, sender=PolicyHolder)
-def trigger_bonus_on_anniversary(sender, instance, **kwargs):
-    """Trigger bonus calculation on policyholder's anniversary."""
-    today = date.today()
-    
-    # Ensure policy is active and it is the anniversary
-    if instance.status == 'Active' and instance.start_date.month == today.month and instance.start_date.day == today.day:
-        # Check for existing bonus for the year
-        if not Bonus.objects.filter(
-            policy_holder=instance, 
-            start_date__year=today.year
-        ).exists():
-            try:
-                Bonus.objects.create(
-                    policy_holder=instance,
-                    start_date=today
-                )
-            except ValueError as e:
-                print(f"Bonus creation failed: {e}")
-
-
-
-@receiver(post_save, sender=Loan)
-def accrue_interest_on_loan_save(sender, instance, **kwargs):
-    """Automatically accrue interest when a loan is saved."""
-    instance.accrue_interest()
-
-@receiver(post_save, sender=LoanRepayment)
-def reset_interest_on_repayment(sender, instance, **kwargs):
-    """Reset interest accrual after a repayment is processed."""
-    instance.loan.accrue_interest()
-
-#Trigger Claim Processing wheneve the claim request is created
-@receiver(post_save, sender=ClaimRequest)
-def create_claim_processing(sender, instance, created, **kwargs):
-    """Create claim processing when a claim request is created."""
-    if created:
-        ClaimProcessing.objects.create(
-            branch=instance.branch,
-            claim_request=instance
-        )
-# automatically mark the paid onece the payment  is approved
-@receiver(post_save, sender=ClaimProcessing)
-def auto_finalize_payment(sender, instance, **kwargs):
-    if instance.processing_status == 'Approved':
-        PaymentProcessing.objects.filter(claim_request=instance.claim_request).update(
-            processing_status='Completed'
-        )
+        logger.error(f"Error in agent_application_approval: {str(e)}")
 
 # Signal to create UserProfile when User is created
 @receiver(post_save, sender=User)
 def create_or_update_user_profile(sender, instance, created, **kwargs):
     """Create or update UserProfile when User is created/updated."""
-    if created:
-        profile = UserProfile.objects.create(user=instance)
-        if not instance.is_superuser:
-            first_company = Company.objects.first()
-            if first_company:
-                profile.company = first_company
-                profile.save()
+    try:
+        if created:
+            profile = UserProfile.objects.create(user=instance)
+            if not instance.is_superuser:
+                first_company = Company.objects.first()
+                if first_company:
+                    profile.company = first_company
+                    profile.save()
+                    logger.info(f"Created user profile for {instance.username}")
+    except Exception as e:
+        logger.error(f"Error creating user profile: {str(e)}")
+
+@receiver(post_save, sender=Loan)
+def accrue_interest_on_loan_save(sender, instance, **kwargs):
+    """Automatically accrue interest when a loan is saved."""
+    try:
+        # Skip if this is from a signal to prevent recursion
+        if getattr(instance, '_from_signal', False):
+            return
+            
+        instance._from_signal = True
+        instance.accrue_interest()
+        instance._from_signal = False
+    except Exception as e:
+        logger.error(f"Error accruing interest on loan {instance.id}: {str(e)}")
+
+@receiver(post_save, sender=LoanRepayment)
+def process_loan_repayment(sender, instance, created, **kwargs):
+    """Process loan repayment and update loan status."""
+    if not created:
+        return  # Only process new repayments
+        
+    try:
+        with transaction.atomic():
+            loan = instance.loan
+            
+            # Skip if this is from a signal to prevent recursion
+            if getattr(loan, '_from_signal', False):
+                return
+                
+            loan._from_signal = True
+            instance.process_repayment()
+            loan._from_signal = False
+            
+            # Check if loan is fully paid
+            if loan.remaining_balance <= 0:
+                loan.loan_status = 'Paid'
+                loan.save(update_fields=['loan_status'])
+                logger.info(f"Loan {loan.id} marked as fully paid")
+    except Exception as e:
+        logger.error(f"Error processing loan repayment {instance.id}: {str(e)}")
+
+#Trigger Claim Processing wheneve the claim request is created
+@receiver(post_save, sender=ClaimRequest)
+def create_claim_processing(sender, instance, created, **kwargs):
+    """Create claim processing when a claim request is created."""
+    if not created:
+        return
+        
+    try:
+        ClaimProcessing.objects.create(
+            branch=instance.branch,
+            claim_request=instance
+        )
+        logger.info(f"Created claim processing for claim request {instance.id}")
+    except Exception as e:
+        logger.error(f"Error creating claim processing: {str(e)}")
+
+# automatically mark the paid once the payment is approved
+@receiver(post_save, sender=ClaimProcessing)
+def auto_finalize_payment(sender, instance, **kwargs):
+    try:
+        if instance.processing_status == 'Approved':
+            PaymentProcessing.objects.filter(claim_request=instance.claim_request).update(
+                processing_status='Completed'
+            )
+            logger.info(f"Auto-finalized payment for claim {instance.claim_request.id}")
+    except Exception as e:
+        logger.error(f"Error finalizing payment: {str(e)}")
+
+@receiver(post_save, sender=PolicyHolder)
+def create_policyholder_user(sender, instance, created, **kwargs):
+    """Create User account for PolicyHolder if it doesn't exist."""
+    if created and instance.phone_number and not instance.user:
+        try:
+            # Use phone number as username
+            username = instance.phone_number
+            
+            # Check if user already exists
+            if not User.objects.filter(username=username).exists():
+                # Create a random password (they can reset it later via OTP)
+                # or set a default password they must change
+                password = ''.join([str(random.randint(0, 9)) for _ in range(8)])
+                
+                # Create user
+                user = User.objects.create_user(
+                    username=username,
+                    email=instance.email,
+                    password=password,
+                    first_name=instance.first_name,
+                    last_name=instance.last_name
+                )
+                
+                # Link user to policy holder
+                instance.user = user
+                instance.save(update_fields=['user'])
+                
+                logger.info(f"Created user account for policy holder {instance.id}")
+            else:
+                # If user exists, link it
+                user = User.objects.get(username=username)
+                instance.user = user
+                instance.save(update_fields=['user'])
+                
+        except Exception as e:
+            logger.error(f"Error creating user for policy holder {instance.id}: {str(e)}")

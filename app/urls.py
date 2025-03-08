@@ -2,8 +2,21 @@
 from django.urls import path
 from . import views
 from .views import fetch_policyholder_data, get_policy_holders, dashboard_view
+from . import auth_views  # Import our new auth views
 
 urlpatterns = [
+    # Mobile Authentication Endpoints
+    path('mobile/login', auth_views.mobile_login, name='mobile_login'),
+    path('mobile/logout', auth_views.mobile_logout, name='mobile_logout'),
+    path('mobile/otp/generate', auth_views.generate_otp, name='generate_otp'),
+    path('mobile/otp/verify', auth_views.verify_otp, name='verify_otp'),
+    path('mobile/password/change', auth_views.change_password, name='change_password'),
+    
+    # Mobile Profile Endpoints
+    path('mobile/profile', auth_views.get_profile, name='get_profile'),
+    path('mobile/policyholder/policies', auth_views.get_policy_holder_policies, name='get_policy_holder_policies'),
+    path('mobile/agent/clients', auth_views.get_agent_clients, name='get_agent_clients'),
+
     # Home/Dashboard
     path('home', views.insuranceHome, name='insuranceHome'),
 

@@ -1,0 +1,364 @@
+{
+  "base_url": "/api/",
+  "authentication": {
+    "endpoints": [
+      {
+        "name": "Login",
+        "endpoint": "mobile/login",
+        "method": "POST",
+        "authentication_required": false,
+        "description": "Authenticate user with phone number and password",
+        "request": {
+          "phone_number": "string (required)",
+          "password": "string (required)"
+        },
+        "response": {
+          "success": {
+            "message": "Login successful",
+            "user_id": "integer",
+            "user_type": "string (policy_holder or agent)",
+            "user_data": {
+              "id": "integer",
+              "name": "string",
+              "policy_number": "string (for policy_holder)",
+              "agent_code": "string (for agent)",
+              "phone_number": "string",
+              "email": "string"
+            }
+          },
+          "error": {
+            "error": "Error message"
+          }
+        }
+      },
+      {
+        "name": "Logout",
+        "endpoint": "mobile/logout",
+        "method": "POST",
+        "authentication_required": true,
+        "description": "Log out the current user",
+        "request": {},
+        "response": {
+          "success": {
+            "message": "Logged out successfully"
+          }
+        }
+      },
+      {
+        "name": "Generate OTP",
+        "endpoint": "mobile/otp/generate",
+        "method": "POST",
+        "authentication_required": false,
+        "description": "Generate OTP for password reset",
+        "request": {
+          "phone_number": "string (required)"
+        },
+        "response": {
+          "success": {
+            "message": "OTP generated successfully",
+            "otp": "string (6-digit code, for testing only)",
+            "expires_at": "datetime"
+          },
+          "error": {
+            "error": "Error message"
+          }
+        }
+      },
+      {
+        "name": "Verify OTP",
+        "endpoint": "mobile/otp/verify",
+        "method": "POST",
+        "authentication_required": false,
+        "description": "Verify OTP and set new password",
+        "request": {
+          "phone_number": "string (required)",
+          "otp": "string (required)",
+          "new_password": "string (required)"
+        },
+        "response": {
+          "success": {
+            "message": "Password reset successful"
+          },
+          "error": {
+            "error": "Error message"
+          }
+        }
+      },
+      {
+        "name": "Change Password",
+        "endpoint": "mobile/password/change",
+        "method": "POST",
+        "authentication_required": true,
+        "description": "Change password for logged-in user",
+        "request": {
+          "current_password": "string (required)",
+          "new_password": "string (required)"
+        },
+        "response": {
+          "success": {
+            "message": "Password changed successfully"
+          },
+          "error": {
+            "error": "Error message"
+          }
+        }
+      }
+    ]
+  },
+  "profile": {
+    "endpoints": [
+      {
+        "name": "Get Profile",
+        "endpoint": "mobile/profile",
+        "method": "GET",
+        "authentication_required": true,
+        "description": "Get profile information for the logged-in user",
+        "request": {},
+        "response": {
+          "success": {
+            "user_id": "integer",
+            "username": "string",
+            "user_type": "string (policy_holder or agent)",
+            "id": "integer",
+            "first_name": "string (for policy_holder)",
+            "last_name": "string (for policy_holder)",
+            "name": "string (for agent)",
+            "policy_number": "string (for policy_holder)",
+            "agent_code": "string (for agent)",
+            "phone_number": "string",
+            "email": "string",
+            "date_of_birth": "date (for policy_holder)",
+            "gender": "string (for policy_holder)",
+            "policy": {
+              "id": "integer",
+              "name": "string",
+              "policy_type": "string",
+              "sum_assured": "string",
+              "start_date": "date",
+              "maturity_date": "date"
+            },
+            "payment": {
+              "payment_status": "string",
+              "next_payment_date": "date",
+              "total_paid": "string",
+              "total_premium": "string",
+              "remaining_premium": "string"
+            },
+            "branch_name": "string (for agent)",
+            "is_active": "boolean (for agent)",
+            "commission_rate": "string (for agent)",
+            "total_policies_sold": "integer (for agent)",
+            "performance": {
+              "report_date": "date",
+              "policies_sold": "integer",
+              "total_premium": "string",
+              "commission_earned": "string",
+              "target_achievement": "string"
+            }
+          },
+          "error": {
+            "error": "Error message"
+          }
+        }
+      },
+      {
+        "name": "Get PolicyHolder Policies",
+        "endpoint": "mobile/policyholder/policies",
+        "method": "GET",
+        "authentication_required": true,
+        "description": "Get policy details for the logged-in policy holder",
+        "request": {},
+        "response": {
+          "success": {
+            "id": "integer",
+            "name": "string",
+            "policy_type": "string",
+            "sum_assured": "string",
+            "start_date": "date",
+            "maturity_date": "date",
+            "duration_years": "integer",
+            "include_adb": "boolean",
+            "include_ptd": "boolean",
+            "payment_interval": "string",
+            "payment_status": "string"
+          },
+          "error": {
+            "error": "Error message"
+          }
+        }
+      },
+      {
+        "name": "Get Agent Clients",
+        "endpoint": "mobile/agent/clients",
+        "method": "GET",
+        "authentication_required": true,
+        "description": "Get clients for the logged-in agent",
+        "request": {},
+        "response": {
+          "success": [
+            {
+              "id": "integer",
+              "name": "string",
+              "policy_number": "string",
+              "policy_name": "string",
+              "sum_assured": "string",
+              "start_date": "date",
+              "status": "string"
+            }
+          ],
+          "error": {
+            "error": "Error message"
+          }
+        }
+      }
+    ]
+  },
+  "claims": {
+    "endpoints": [
+      {
+        "name": "Get PolicyHolder Claims",
+        "endpoint": "claims/policyholder/<int:policyHolderId>",
+        "method": "GET",
+        "authentication_required": true,
+        "description": "Get all claims for a policy holder",
+        "request": {},
+        "response": {
+          "success": [
+            {
+              "id": "integer",
+              "claim_date": "date",
+              "status": "string",
+              "reason": "string",
+              "claim_amount": "string"
+            }
+          ],
+          "error": {
+            "error": "Error message"
+          }
+        }
+      },
+      {
+        "name": "Create Claim Request",
+        "endpoint": "claims/create",
+        "method": "POST",
+        "authentication_required": true,
+        "description": "Create a new claim request",
+        "request": {
+          "policy_holder": "integer (required)",
+          "reason": "string (required)",
+          "other_reason": "string",
+          "bill": "file",
+          "health_report": "file",
+          "policy_copy": "file"
+        },
+        "response": {
+          "success": {
+            "id": "integer",
+            "message": "Claim request created successfully"
+          },
+          "error": {
+            "error": "Error message"
+          }
+        }
+      }
+    ]
+  },
+  "premium_payments": {
+    "endpoints": [
+      {
+        "name": "Get PolicyHolder Payments",
+        "endpoint": "payments",
+        "method": "GET",
+        "authentication_required": true,
+        "description": "Get premium payment details",
+        "request": {},
+        "response": {
+          "success": [
+            {
+              "id": "integer",
+              "policy_holder": "integer",
+              "annual_premium": "string",
+              "interval_payment": "string",
+              "total_paid": "string",
+              "next_payment_date": "date",
+              "payment_status": "string",
+              "remaining_premium": "string"
+            }
+          ],
+          "error": {
+            "error": "Error message"
+          }
+        }
+      },
+      {
+        "name": "Create Payment",
+        "endpoint": "payments/create",
+        "method": "POST",
+        "authentication_required": true,
+        "description": "Record a premium payment",
+        "request": {
+          "policy_holder": "integer (required)",
+          "paid_amount": "decimal (required)"
+        },
+        "response": {
+          "success": {
+            "id": "integer",
+            "message": "Payment recorded successfully"
+          },
+          "error": {
+            "error": "Error message"
+          }
+        }
+      }
+    ]
+  },
+  "model_structure": {
+    "PolicyHolder": {
+      "id": "integer (auto)",
+      "user": "User object (for authentication)",
+      "company": "Company object",
+      "branch": "Branch object",
+      "policy_number": "integer (unique)",
+      "agent": "SalesAgent object",
+      "policy": "InsurancePolicy object",
+      "duration_years": "integer",
+      "sum_assured": "decimal",
+      "first_name": "string",
+      "middle_name": "string",
+      "last_name": "string",
+      "gender": "string (M/F/O)",
+      "date_of_birth": "date",
+      "age": "integer (calculated)",
+      "phone_number": "string (unique, used for login)",
+      "email": "string",
+      "status": "string"
+    },
+    "SalesAgent": {
+      "id": "integer (auto)",
+      "user": "User object (for authentication)",
+      "branch": "Branch object",
+      "application": "AgentApplication object",
+      "agent_code": "string (unique)",
+      "is_active": "boolean",
+      "joining_date": "date",
+      "commission_rate": "decimal",
+      "phone_number": "string (unique, used for login)",
+      "email": "string",
+      "status": "string"
+    },
+    "User": {
+      "username": "string (phone_number)",
+      "password": "string (hashed, default 'agent123' for new agents)",
+      "email": "string",
+      "first_name": "string",
+      "last_name": "string"
+    },
+    "OTP": {
+      "user": "User object",
+      "otp": "string (6-digit code)",
+      "created_at": "datetime",
+      "expires_at": "datetime",
+      "is_used": "boolean"
+    }
+  }
+}

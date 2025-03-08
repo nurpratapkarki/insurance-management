@@ -10,6 +10,8 @@ from django.db.models import Sum, Avg, Count, F
 from typing import Dict, Union
 from django.dispatch import receiver
 import logging
+from django.utils import timezone
+import random
 
 logger = logging.getLogger(__name__)
 from .constants import (
@@ -262,6 +264,7 @@ class AgentApplication(models.Model):
 
 class SalesAgent(models.Model):
     id = models.BigAutoField(primary_key=True)
+    user = models.OneToOneField(User, on_delete=models.SET_NULL, related_name='sales_agent', null=True, blank=True)
     branch = models.ForeignKey(
         Branch, on_delete=models.CASCADE, related_name='sales_agents', default=1)
     application = models.OneToOneField(
@@ -284,6 +287,8 @@ class SalesAgent(models.Model):
     termination_date = models.DateField(null=True, blank=True)
     termination_reason = models.CharField(
         max_length=200, null=True, blank=True)
+    phone_number = models.CharField(max_length=15, unique=True)
+    email = models.EmailField(max_length=200, null=True, blank=True)
 
     status = models.CharField(
         max_length=20, choices=EMPLOYEE_STATUS_CHOICES, default='ACTIVE')
@@ -338,6 +343,7 @@ class DurationFactor(models.Model):
 
 class PolicyHolder(models.Model):
     id = models.BigAutoField(primary_key=True)
+    user = models.OneToOneField(User, on_delete=models.SET_NULL, related_name='policy_holder', null=True, blank=True)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='policy_holders', default=1)
     branch = models.ForeignKey(Branch, on_delete=models.CASCADE, blank=True, null=True)
     policy_number = models.IntegerField(
@@ -356,9 +362,11 @@ class PolicyHolder(models.Model):
     age = models.PositiveIntegerField(editable=False, null=True)
     phone_number = models.CharField(
         max_length=15,
+        unique=True,
         null=True,
         blank=True
     )
+    email = models.EmailField(max_length=200, null=True, blank=True)
     emergency_contact_name = models.CharField(
         max_length=200, blank=True, null=True)
     emergency_contact_number = models.CharField(
@@ -593,7 +601,7 @@ class Bonus(models.Model):
             current_year = date.today().year
 
             # Fetch applicable bonus rate for the current year
-            bonus_rate_obj = BonusRate.get_bonus_rate(policy.policy_type, duration, )
+            bonus_rate_obj = BonusRate.get_bonus_rate(policy.policy_type, duration)
             if not bonus_rate_obj:
                 return Decimal(0)  # No bonus if rate is not defined
 
@@ -944,7 +952,7 @@ class PremiumPayment(models.Model):
                 # Total Bonuses
                 total_bonuses = self.policy_holder.bonuses.aggregate(
                     total=Sum('accrued_amount'))['total'] or Decimal('0.00')
-
+                
                 # Calculate SSV
                 premium_component = self.total_paid * (applicable_range.ssv_factor / Decimal(100))
                 ssv = premium_component + total_bonuses
@@ -1197,3 +1205,40 @@ class LoanRepayment(models.Model):
 
     def __str__(self):
         return f"Repayment for {self.loan} on {self.repayment_date}"
+
+class OTP(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='otps')
+    otp = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    is_used = models.BooleanField(default=False)
+    
+    class Meta:
+        verbose_name = "OTP"
+        verbose_name_plural = "OTPs"
+        
+    def __str__(self):
+        return f"OTP for {self.user.username}"
+    
+    def save(self, *args, **kwargs):
+        # Set expiry to 10 minutes from now if not already set
+        if not self.expires_at:
+            self.expires_at = timezone.now() + timezone.timedelta(minutes=10)
+        super().save(*args, **kwargs)
+    
+    @property
+    def is_expired(self):
+        return timezone.now() > self.expires_at
+    
+    @classmethod
+    def generate_otp(cls, user):
+        # Generate a random 6-digit OTP
+        otp_value = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+        
+        # Create new OTP object
+        otp = cls.objects.create(
+            user=user,
+            otp=otp_value,
+        )
+        
+        return otp
