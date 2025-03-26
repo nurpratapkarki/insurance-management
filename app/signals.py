@@ -1,12 +1,15 @@
-from django.db.models.signals import post_save, pre_delete,pre_save
+from django.db.models.signals import post_save, pre_delete, pre_save
 from django.dispatch import receiver
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import transaction, DatabaseError, IntegrityError
 from decimal import Decimal
-from datetime import date
+from datetime import date, datetime, timedelta
 from django.utils import timezone
 from django.contrib.auth.models import User
 import logging
+from functools import wraps
+from django.db.models import F, Sum
+
 from .models import (
     PolicyHolder, 
     Underwriting, 
@@ -23,12 +26,34 @@ from .models import (
     Branch,
     Company,
     UserProfile,
-    Bonus
+    Bonus,
+    Commission
 )
 import random
 
 # Configure logger
 logger = logging.getLogger(__name__)
+
+def transaction_retry(max_attempts=3, delay=1):
+    """Decorator to retry database operations on failure"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            attempt = 0
+            while attempt < max_attempts:
+                try:
+                    with transaction.atomic():
+                        return func(*args, **kwargs)
+                except (DatabaseError, IntegrityError) as e:
+                    attempt += 1
+                    if attempt >= max_attempts:
+                        logger.error(f"Transaction failed after {max_attempts} attempts: {str(e)}")
+                        raise
+                    logger.warning(f"Transaction attempt {attempt} failed: {str(e)}. Retrying...")
+                    import time
+                    time.sleep(delay * (2 ** (attempt - 1)))  # Exponential backoff
+        return wrapper
+    return decorator
 
 # Signal dispatch order control with dispatch_uid
 @receiver(post_save, sender=PolicyHolder, dispatch_uid="policy_holder_post_save_handler")
@@ -198,96 +223,137 @@ def cleanup_policy_holder(sender, instance, **kwargs):
     except Exception as e:
         logger.error(f"Error in cleanup_policy_holder signal: {str(e)}")
 
-@receiver(post_save, sender=PremiumPayment)
-def update_policy_holder_payment_status(sender, instance, **kwargs):
-    """
-    Update PolicyHolder payment status when premium payment changes
-    """
+@receiver(post_save, sender='app.PremiumPayment')
+def premium_payment_post_save(sender, instance, created, **kwargs):
+    """Signal handler for post-save operations on PremiumPayment."""
     try:
-        policy_holder = instance.policy_holder
+        logger.info(f"Premium payment post-save signal triggered for {instance}")
         
-        # Skip if this is a signal-triggered save
-        if getattr(policy_holder, '_skip_signal', False):
+        # Update policy holder payment status based on premium payments
+        update_policy_holder_payment_status(instance.policy_holder)
+        
+        # Update agent reports and commission if applicable
+        update_agent_report_and_commission(instance)
+        
+    except Exception as e:
+        logger.error(f"Error in premium_payment_post_save: {e}")
+
+def update_policy_holder_payment_status(policy_holder):
+    """Update the payment status of a PolicyHolder based on premium payments."""
+    try:
+        # Get the premium payment for this policy
+        premium_payment = policy_holder.premium_payments.first()
+        
+        if not premium_payment:
             return
             
-        # Calculate new status based on payment amounts
-        if instance.total_paid >= instance.total_premium:
-            new_status = 'Paid'
-        elif instance.total_paid > 0:
-            new_status = 'Partially Paid'
-        else:
-            new_status = 'Due'
+        # Log current values
+        logger.info(f"Updating payment status for {policy_holder.id}: " 
+                   f"total_paid={premium_payment.total_paid}, "
+                   f"total_premium={premium_payment.total_premium}")
             
-        # Update only if status has changed
-        if policy_holder.payment_status != new_status:
-            policy_holder._skip_signal = True
-            PolicyHolder.objects.filter(id=policy_holder.id).update(
-                payment_status=new_status
-            )
-            policy_holder._skip_signal = False
-            logger.info(f"Updated payment status for policy {policy_holder.id} to {new_status}")
+        # Determine payment status
+        if premium_payment.total_paid >= premium_payment.total_premium:
+            policy_holder.payment_status = 'Paid'
+        elif premium_payment.total_paid > 0:
+            policy_holder.payment_status = 'Partially Paid'
+        else:
+            policy_holder.payment_status = 'Unpaid'
+            
+        policy_holder.save(update_fields=['payment_status'])
+        logger.info(f"Updated {policy_holder.id} status to {policy_holder.payment_status}")
             
     except Exception as e:
-        logger.error(f"Error updating payment status: {str(e)}")
+        logger.error(f"Error in update_policy_holder_payment_status: {e}")
 
-@receiver(post_save, sender=PremiumPayment)
-def update_agent_report_and_commission(sender, instance, created, **kwargs):
-    """Update agent report and commission when a premium payment is made"""
-    if not instance.policy_holder.agent:
-        return
-
+def update_agent_report_and_commission(premium_payment):
+    """Update agent report and commission when a premium payment is made."""
     try:
-        with transaction.atomic():
-            agent = instance.policy_holder.agent
-            report_date = instance.next_payment_date or timezone.now().date()
+        policy_holder = premium_payment.policy_holder
+        
+        # Skip if no agent is assigned
+        if not hasattr(policy_holder, 'agent') or not policy_holder.agent:
+            return
             
-            # Get or create monthly report
-            report, created = AgentReport.objects.get_or_create(
-                agent=agent,
-                branch=agent.branch,
-                report_date=report_date.replace(day=1),  # First day of current month
-                defaults={
-                    'reporting_period': f"{report_date.year}-{report_date.month}",
-                    'policies_sold': 0,
-                    'total_premium': Decimal('0.00'),
-                    'commission_earned': Decimal('0.00'),
-                    'target_achievement': Decimal('0.00'),
-                    'renewal_rate': Decimal('0.00'),
-                    'customer_retention': Decimal('0.00'),
-                }
+        # Get or create agent report
+        report, created = AgentReport.objects.get_or_create(
+            agent=policy_holder.agent,
+            month=date.today().month,
+            year=date.today().year
+        )
+        
+        # Calculate commission amount
+        commission_rate = getattr(policy_holder.agent, 'commission_rate', None)
+        if not commission_rate:
+            commission_rate = Decimal('0.15')  # Default 15%
+            
+        # Only calculate commission on the newly paid amount
+        commission_amount = premium_payment.paid_amount * commission_rate
+        
+        # Create commission record
+        if commission_amount > 0:
+            Commission.objects.create(
+                agent=policy_holder.agent,
+                policy_holder=policy_holder,
+                amount=commission_amount,
+                date=date.today(),
+                status='Pending'
             )
-
-            if instance.paid_amount > 0:  # Only process if there's a new payment
-                commission = (instance.paid_amount * agent.commission_rate / 100)
-                
-                # Update report
-                report.total_premium += instance.paid_amount
-                report.commission_earned += commission
-                
-                # Update agent's total premium collected
-                agent.total_premium_collected += instance.paid_amount
-                agent.save()
-                
-                logger.info(f"Updated agent {agent.id} commission by {commission}")
-                
-            # Calculate target achievement (assuming monthly target is stored somewhere)
-            if hasattr(agent, 'monthly_target') and agent.monthly_target:
-                report.target_achievement = (report.total_premium / agent.monthly_target) * 100
-                
-            # Calculate renewal rate (if applicable)
-            total_policies = PolicyHolder.objects.filter(agent=agent).count()
-            renewed_policies = PolicyHolder.objects.filter(
-                agent=agent,
-                status='Active',
-                maturity_date__gte=report_date  
-            ).count()
             
-            if total_policies > 0:
-                report.renewal_rate = (renewed_policies / total_policies) * 100
+            # Update agent report
+            report.total_premium = F('total_premium') + premium_payment.paid_amount
+            report.total_commission = F('total_commission') + commission_amount
             report.save()
             
+            logger.info(f"Created commission of {commission_amount} for agent {policy_holder.agent.id}")
+            
     except Exception as e:
-        logger.error(f"Error in update_agent_report_and_commission: {str(e)}")
+        logger.error(f"Error in update_agent_report_and_commission: {e}")
+        
+        
+@receiver(post_save, sender='app.PolicyHolder')
+def policy_holder_post_save(sender, instance, created, **kwargs):
+    """Signal handler for post-save operations on PolicyHolder"""
+    try:
+        # Don't proceed if this is a modification and payment_status hasn't changed
+        if not created and 'payment_status' not in kwargs.get('update_fields', []):
+            return
+
+        # Check if premium payment exists
+        premium_payment = instance.premium_payments.first()
+        
+        # Create new premium payment if doesn't exist and policy is approved
+        if not premium_payment and instance.status == 'Approved':
+            logger.info(f"Creating premium payment for {instance.id}")
+            premium_payment = PremiumPayment.objects.create(
+                policy_holder=instance
+            )
+            
+            # Force premium calculation
+            annual, interval = premium_payment.calculate_premium()
+            premium_payment.annual_premium = annual
+            premium_payment.interval_payment = interval
+            
+            # Set total premium based on duration and payment interval
+            if instance.payment_interval == "Single":
+                premium_payment.total_premium = interval
+            else:
+                premium_payment.total_premium = annual * Decimal(str(instance.duration_years))
+                
+            premium_payment.save()
+            
+            logger.info(f"Created premium payment: annual={annual}, interval={interval}, total={premium_payment.total_premium}")
+            
+            # Create initial underwriting if it doesn't exist
+            if not hasattr(instance, 'underwriting'):
+                from .models import Underwriting
+                Underwriting.objects.create(
+                    policy_holder=instance,
+                    status='Pending',
+                    assessment_date=date.today()
+                )
+    except Exception as e:
+        logger.error(f"Error in policy_holder_post_save: {e}")
 
 @receiver(post_save, sender=AgentApplication)
 def agent_application_approval(sender, instance, created, **kwargs):

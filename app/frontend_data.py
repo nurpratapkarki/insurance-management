@@ -9,7 +9,7 @@ class Dashboard:
     """
     A model-like structure to fetch and display dashboard data with user-specific filtering.
     """
-    def __init__(self, user):
+    def __init__(self, user):   
         self.user = user
         self.user_branch = getattr(user, 'branch', None)
     

@@ -42,7 +42,6 @@ INSTALLED_APPS = [
     'app',
     'rest_framework',
     'corsheaders',
-   
 ]
 
 MIDDLEWARE = [
@@ -65,9 +64,7 @@ CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
 CORS_ALLOWED_ORIGINS = [
-    'https://insurance-management-abok.onrender.com',
     'http://192.168.18.4:5173', 
-    
 ]
 APPEND_SLASH = False
 ROOT_URLCONF = 'InsuranceBackend.urls'
@@ -147,7 +144,6 @@ STATICFILES_DIRS = [BASE_DIR / 'static']
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
-
 
 
 customColorPalette = [

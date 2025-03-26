@@ -1,26 +1,33 @@
-from django.contrib import admin
-from django.db.models.signals import post_save
+from django.contrib import admin, messages
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import User
-from django.contrib import messages
-from datetime import date
-from django.core.exceptions import ValidationError
+from django.db import models
 from django import forms
-from django.urls import reverse
-from django.utils.html import format_html
-from django.shortcuts import render, redirect
 from django.http import HttpResponseRedirect
 from django.urls import path
-from decimal import Decimal
+from django.shortcuts import render, redirect
+from django.core.exceptions import ValidationError
+from django.utils.html import format_html
+from django.template.loader import render_to_string
+from django.utils.safestring import mark_safe
+from django.db.models.signals import post_save
+from datetime import date, datetime, timedelta
+from django.core.exceptions import ValidationError
+from django.urls import reverse
+from django.utils.html import format_html
+from django.contrib import messages
 from django.contrib.admin import site
 from django.db.models import Sum
 from .views import manage_mortality_rates  
-from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .frontend_data import *
 from .models import (
     InsurancePolicy, SalesAgent, PolicyHolder, Underwriting,
     ClaimRequest, ClaimProcessing, PremiumPayment,MortalityRate,
-    EmployeePosition, Employee, PaymentProcessing, Branch, Company, AgentReport, AgentApplication, Occupation, DurationFactor, GSVRate, SSVConfig, Bonus, BonusRate, Loan, LoanRepayment,UserProfile, OTP
+    EmployeePosition, Employee, PaymentProcessing, Branch, Company, AgentReport, AgentApplication, Occupation, DurationFactor, GSVRate, SSVConfig, Bonus, BonusRate, Loan, LoanRepayment,UserProfile, OTP, Commission
 )
+from decimal import Decimal
+import logging
+from django.utils.translation import gettext_lazy as _
 
 
 # Mixin for filtering 'Branch' and 'user' fields
@@ -173,6 +180,8 @@ class PolicyHolderAdmin(BranchFilterMixin, admin.ModelAdmin):
     search_fields = ('first_name', 'last_name','policy_number')
     list_filter = ('status', 'policy', 'occupation')
     inlines = [BonusInline, UnderwritingInline]
+    # change_form_template = 'policyholder/change_form.html'
+    
     fieldsets = (
         ("Personal Information", {
             'fields': (
@@ -214,6 +223,34 @@ class PolicyHolderAdmin(BranchFilterMixin, admin.ModelAdmin):
             )
         }),
     )
+    
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                'print/<path:object_id>/',
+                self.admin_site.admin_view(self.print_policy),
+                name='print_policy',
+            ),
+        ]
+        return custom_urls + urls
+    
+    def print_policy(self, request, object_id):
+        try:
+            policyholder = self.get_object(request, object_id)
+            company_name = policyholder.branch.company.name if policyholder.branch and policyholder.branch.company else "Insurance Company"
+            
+            context = {
+                'title': f'Policy #{policyholder.policy_number}',
+                'original': policyholder,
+                'company_name': company_name,
+                'opts': self.model._meta,
+                'media': self.media,
+            }
+            
+            return render(request, 'policyholder/print.html', context)
+        except (PolicyHolder.DoesNotExist, ValidationError):
+            return redirect('admin:app_policyholder_changelist')
 
     def get_queryset(self, request):
         """Limit PolicyHolder queryset to user's branch."""
@@ -346,16 +383,16 @@ class DurationFactorAdmin(admin.ModelAdmin):
 class PremiumPaymentAdmin(admin.ModelAdmin):
     list_display = (
         'policy_holder', 'annual_premium', 'total_premium', 'interval_payment',
-        'total_paid', 'payment_status', 'next_payment_date'
+        'total_paid', 'fine_due', 'fine_paid', 'payment_status', 'next_payment_date'
     )
     list_filter = ('payment_status', 'policy_holder__payment_interval')
     search_fields = ('policy_holder__first_name', 'policy_holder__last_name', 'policy_holder__policy_number')
     readonly_fields = (
         'annual_premium', 'interval_payment', 'total_premium',
-        'remaining_premium','total_paid' , 'gsv_value', 'ssv_value'
+        'remaining_premium','total_paid', 'fine_paid', 'gsv_value', 'ssv_value'
     )
     
-    actions = ['add_payment']
+    actions = ['add_payment', 'check_policy_expiry']
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -379,28 +416,130 @@ class PremiumPaymentAdmin(admin.ModelAdmin):
                 pass
         return form
 
+    @admin.action(description="Record payment for selected items")
     def add_payment(self, request, queryset):
-        """Admin action to record payments"""
+        update_count = 0
+        error_count = 0
         for payment in queryset:
-            payment.add_payment(payment.interval_payment)
-        self.message_user(request, "Payments recorded successfully")
-    add_payment.short_description = "Record payment for selected items"
-
-    def save_model(self, request, obj, form, change):
-        try:
-            if obj.paid_amount < 0:
-                raise ValidationError("Paid amount cannot be negative")
+            try:
+                # Calculate any applicable fine
+                fine = payment.calculate_fine()
                 
-            super().save_model(request, obj, form, change)
-            
-            if obj.paid_amount > 0:
+                # Add the current interval payment plus any fine
+                payment_amount = payment.interval_payment
+                if fine > Decimal('0.00'):
+                    payment_amount += fine  # Include fine in payment
+                    self.message_user(
+                        request,
+                        f"Fine of {fine} included for {payment.policy_holder}.",
+                        level=messages.INFO
+                    )
+                
+                # Check for policy expiry first
+                if payment.check_policy_expiry():
+                    self.message_user(
+                        request, 
+                        f"Policy for {payment.policy_holder} has expired due to non-payment for over 3 years.", 
+                        level=messages.WARNING
+                    )
+                    error_count += 1
+                    continue
+                    
+                # Validate if the period is already paid
+                if payment.is_current_period_paid():
+                    self.message_user(
+                        request, 
+                        f"Payment for {payment.policy_holder} was skipped: current period already paid.", 
+                        level=messages.WARNING
+                    )
+                    error_count += 1
+                    continue
+                
+                # Use the model's add_payment method
+                if payment.add_payment(payment_amount):
+                    update_count += 1
+                    
+                    # Update the next payment date
+                    if payment.policy_holder.payment_interval != "Single":
+                        interval_months = {
+                            "quarterly": 3,
+                            "semi_annual": 6,
+                            "annual": 12
+                        }.get(payment.policy_holder.payment_interval)
+                        
+                        if payment.next_payment_date:
+                            payment.next_payment_date = payment.next_payment_date.replace(
+                                month=((payment.next_payment_date.month - 1 + interval_months) % 12) + 1,
+                                year=payment.next_payment_date.year + ((payment.next_payment_date.month - 1 + interval_months) // 12)
+                            )
+                        else:
+                            today = date.today()
+                            payment.next_payment_date = today.replace(
+                                month=((today.month - 1 + interval_months) % 12) + 1,
+                                year=today.year + ((today.month - 1 + interval_months) // 12)
+                            )
+                        
+                        payment.save()
+                        
+                    # Display total amount paid including any fine
+                    self.message_user(
+                        request,
+                        f"Payment of {payment_amount} recorded for {payment.policy_holder}.",
+                        level=messages.SUCCESS
+                    )
+            except ValidationError as e:
                 self.message_user(
-                    request,
-                    f"Payment of {obj.paid_amount} recorded successfully. Total paid: {obj.total_paid}",
-                    messages.SUCCESS
+                    request, 
+                    f"Error recording payment for {payment.policy_holder}: {str(e)}", 
+                    level=messages.ERROR
                 )
-        except ValidationError as e:
-            self.message_user(request, str(e), messages.ERROR)
+                error_count += 1
+            except Exception as e:
+                self.message_user(
+                    request, 
+                    f"Unexpected error for {payment.policy_holder}: {str(e)}", 
+                    level=messages.ERROR
+                )
+                error_count += 1
+                
+        message = []
+        if update_count > 0:
+            message.append(f"Successfully recorded payments for {update_count} items.")
+        if error_count > 0:
+            message.append(f"Failed to record payments for {error_count} items.")
+            
+        if message:
+            self.message_user(
+                request,
+                " ".join(message),
+                messages.SUCCESS if error_count == 0 else messages.WARNING,
+            )
+
+    @admin.action(description="Check selected policies for expiry")
+    def check_policy_expiry(self, request, queryset):
+        """Admin action to check if policies have expired due to non-payment"""
+        checked_count = 0
+        expired_count = 0
+        
+        for payment in queryset:
+            checked_count += 1
+            if payment.check_policy_expiry():
+                # Save to persist the 'Expired' status set in check_policy_expiry
+                payment.save(update_fields=['payment_status'])
+                expired_count += 1
+                
+        if expired_count > 0:
+            self.message_user(
+                request,
+                f"Checked {checked_count} policies. {expired_count} policies marked as expired due to non-payment.",
+                messages.WARNING
+            )
+        else:
+            self.message_user(
+                request,
+                f"Checked {checked_count} policies. No expired policies found.",
+                messages.SUCCESS
+            )
 
 
             
@@ -672,7 +811,7 @@ class BranchAdmin(admin.ModelAdmin):
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "branch" and not request.user.is_superuser:
-            kwargs["queryset"] = branch.objects.filter(id=request.user.profile.branch.id)
+            kwargs["queryset"] = Branch.objects.filter(id=request.user.profile.branch.id)
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 @admin.register(UserProfile)
@@ -729,4 +868,20 @@ class OTPAdmin(admin.ModelAdmin):
 
 # Register models
 admin.site.register(OTP, OTPAdmin)
+
+# Register Commission 
+@admin.register(Commission)
+class CommissionAdmin(admin.ModelAdmin):
+    list_display = ('agent', 'policy_holder', 'amount', 'date', 'status')
+    list_filter = ('status', 'date')
+    search_fields = ('agent__first_name', 'agent__last_name', 'policy_holder__policy_number')
+    date_hierarchy = 'date'
+    
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if not request.user.is_superuser and hasattr(request.user, 'profile'):
+            # Filter by branch if user has one
+            return qs.filter(agent__branch=request.user.profile.branch)
+        return qs
+    
     

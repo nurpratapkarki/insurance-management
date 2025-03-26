@@ -362,3 +362,37 @@
     }
   }
 }
+
+
+// Application structure
+
+// ├── Authentication
+// │   ├── Login Screen (phone number + password)
+// │   ├── OTP-based Password Reset
+// │   └── Profile Management
+// ├── Client Management
+// │   ├── Client List
+// │   ├── Client Details
+// │   └── Client Policy Information
+// ├── Performance
+// │   ├── Commission Details
+// │   ├── Sales Summary
+// │   └── Achievement Metrics
+// └── Notifications
+//     ├── New Policy Approvals
+//     ├── Payment Reminders
+//     └── Commission Updates
+
+
+
+// // DFD
+// ┌──────────────┐        ┌──────────────┐        ┌──────────────┐
+// │  React Native│        │   Django     │        │   Database   │
+// │  Mobile App  │◄──────►│   Backend    │◄──────►│   (Models)   │
+// └──────────────┘        └──────────────┘        └──────────────┘
+//        │                       │                       │
+//        │                       │                       │
+// ┌──────▼──────┐        ┌──────▼──────┐        ┌──────▼──────┐
+// │  Auth Flow   │        │  API Views   │        │ PolicyHolder │
+// │ (JWT Token)  │        │ (Endpoints)  │        │ SalesAgent  │
+// └──────────────┘        └──────────────┘        └──────────────┘

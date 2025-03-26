@@ -414,7 +414,7 @@ class PolicyHolder(models.Model):
         blank=True,
         null=True
     )
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='Pending')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')
     work_environment_risk = models.CharField(
     max_length=50, 
     choices=RISK_CHOICES, 
@@ -462,7 +462,7 @@ class PolicyHolder(models.Model):
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')
     payment_status = models.CharField(
-        max_length=50, choices=PROCESSING_STATUS_CHOICES, default="Due")
+        max_length=50, choices=PAYMENT_CHOICES, default="Unpaid")
     start_date = models.DateField(default=date.today)
 
     maturity_date = models.DateField(null=True, blank=True)
@@ -586,42 +586,172 @@ class BonusRate(models.Model):
 
 
 #Bonus Model
+class BonusHistory(models.Model):
+    """Model to track the history of bonus calculations"""
+    policy_holder = models.ForeignKey(PolicyHolder, on_delete=models.CASCADE, related_name='bonus_history')
+    bonus_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    calculation_date = models.DateField(auto_now_add=True, help_text="Date this bonus was calculated")
+    policy_year = models.PositiveIntegerField(help_text="Policy year this bonus applies to")
+    bonus_rate = models.DecimalField(max_digits=5, decimal_places=2, help_text="Bonus rate per 1000 used for calculation")
+    
+    def __str__(self):
+        return f"Year {self.policy_year} Bonus for {self.policy_holder} - {self.bonus_amount}"
+    
+    class Meta:
+        verbose_name = "Bonus History"
+        verbose_name_plural = "Bonus History"
+        ordering = ['-calculation_date']
+        unique_together = ['policy_holder', 'policy_year']
+
 class Bonus(models.Model):
     policy_holder = models.ForeignKey(PolicyHolder, on_delete=models.CASCADE, related_name='bonuses')
     accrued_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
     start_date = models.DateField(help_text="Start date for bonus accrual.")
     last_updated = models.DateField(auto_now=True)
-
-    def calculate_bonus(self):
+    last_anniversary_processed = models.DateField(null=True, blank=True, help_text="Last policy anniversary date when bonus was added")
+    
+    def calculate_bonus(self, for_year=None):
         """Calculate yearly bonus based on policy type, duration, and sum assured."""
         try:
             policy = self.policy_holder.policy
-            duration = self.policy_holder.duration_years
+            policy_start_date = self.policy_holder.start_date
             sum_assured = self.policy_holder.sum_assured
-            current_year = date.today().year
+            today = date.today()
+            
+            # If for_year is provided, use it; otherwise calculate current policy year
+            if for_year is not None:
+                policy_year = for_year
+            else:
+                policy_years = (today.year - policy_start_date.year)
+                if policy_years <= 0:
+                    return Decimal(0)  # No bonus in first year
+                policy_year = policy_years
+                
+            logger.info(f"BONUS CALCULATION - Starting for policy_holder_id={self.policy_holder.id}, " +
+                      f"policy={policy}, sum_assured={sum_assured}, policy_year={policy_year}")
+            
+            # Only endowment policies get bonuses
+            if policy.policy_type != "Endowment":
+                logger.info(f"BONUS CALCULATION - No bonus for policy type {policy.policy_type}")
+                return Decimal(0)
 
-            # Fetch applicable bonus rate for the current year
-            bonus_rate_obj = BonusRate.get_bonus_rate(policy.policy_type, duration)
+            # Fetch applicable bonus rate for the current year and policy duration
+            bonus_rate_obj = BonusRate.get_bonus_rate(policy.policy_type, policy_year)
             if not bonus_rate_obj:
+                logger.warning(f"BONUS CALCULATION - No bonus rate defined for type={policy.policy_type}, year={policy_year}")
                 return Decimal(0)  # No bonus if rate is not defined
 
             bonus_per_1000 = Decimal(bonus_rate_obj.bonus_per_thousand)
-            total_bonus = (sum_assured / Decimal(1000)) * bonus_per_1000
+            logger.info(f"BONUS CALCULATION - Found bonus rate: {bonus_per_1000} per 1000 for year {policy_year}")
+            
+            # Calculate bonus amount = (Sum Assured / 1000) * Bonus Rate per 1000
+            bonus_amount = (sum_assured / Decimal(1000)) * bonus_per_1000
+            bonus_amount = bonus_amount.quantize(Decimal('1.00'))
+            
+            logger.info(f"BONUS CALCULATION - Calculated bonus amount: {bonus_amount}")
+            
+            # Record in bonus history if this is a new calculation
+            if for_year is None or not BonusHistory.objects.filter(
+                policy_holder=self.policy_holder, policy_year=policy_year
+            ).exists():
+                BonusHistory.objects.create(
+                    policy_holder=self.policy_holder,
+                    policy_year=policy_year,
+                    bonus_amount=bonus_amount,
+                    bonus_rate=bonus_per_1000
+                )
+                logger.info(f"BONUS CALCULATION - Created bonus history record for year {policy_year}")
 
-            return total_bonus.quantize(Decimal('1.00'))
+            return bonus_amount
 
         except Exception as e:
+            logger.error(f"BONUS CALCULATION - Error: {str(e)}")
             raise ValidationError(f"Error calculating bonus: {e}")
+
+    def update_anniversary_bonus(self):
+        """Check if policy anniversary has passed and add new bonus if needed."""
+        try:
+            # Skip if not anniversary month/date
+            policy_start = self.policy_holder.start_date
+            today = date.today()
+            
+            # Check if we're in the anniversary month/date
+            is_anniversary = (policy_start.month == today.month and policy_start.day == today.day)
+            
+            if not is_anniversary:
+                # Also check if we missed an anniversary (within last 30 days)
+                days_since_anniversary = 0
+                # Calculate the anniversary date for the current year
+                anniversary_this_year = date(today.year, policy_start.month, policy_start.day)
+                
+                # If the anniversary this year is in the future, use last year's anniversary
+                if anniversary_this_year > today:
+                    anniversary_this_year = date(today.year - 1, policy_start.month, policy_start.day)
+                    
+                days_since_anniversary = (today - anniversary_this_year).days
+                
+                # Only process if we're within 30 days after the anniversary
+                if days_since_anniversary > 30:
+                    return False
+            
+            # Check if we already processed this anniversary
+            anniversary_year = today.year
+            if policy_start.month > today.month or (policy_start.month == today.month and policy_start.day > today.day):
+                anniversary_year -= 1
+                
+            anniversary_date = date(anniversary_year, policy_start.month, policy_start.day)
+            
+            if self.last_anniversary_processed and self.last_anniversary_processed >= anniversary_date:
+                logger.info(f"BONUS UPDATE - Anniversary {anniversary_date} already processed for policy {self.policy_holder.id}")
+                return False
+                
+            # Calculate policy year
+            policy_year = anniversary_year - policy_start.year
+            
+            # Don't add bonus for first year 
+            if policy_year <= 0:
+                return False
+                
+            # Calculate and add bonus
+            new_bonus = self.calculate_bonus(for_year=policy_year)
+            self.accrued_amount += new_bonus
+            self.last_anniversary_processed = anniversary_date
+            self.save(update_fields=['accrued_amount', 'last_anniversary_processed'])
+            
+            logger.info(f"BONUS UPDATE - Added anniversary bonus of {new_bonus} for policy {self.policy_holder.id}, year {policy_year}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"BONUS UPDATE - Error updating anniversary bonus: {str(e)}")
+            return False
 
     def save(self, *args, **kwargs):
         """Recalculate and save accrued bonus."""
-        self.accrued_amount = self.calculate_bonus()
+        # For new bonus records, initialize with current value
+        if not self.pk:
+            # Set start date if not provided
+            if not self.start_date:
+                self.start_date = self.policy_holder.start_date
+                
+            # Calculate initial accrued amount from history
+            bonus_history = BonusHistory.objects.filter(policy_holder=self.policy_holder)
+            self.accrued_amount = bonus_history.aggregate(total=Sum('bonus_amount'))['total'] or Decimal('0.00')
+        else:
+            # Existing record - check for anniversary
+            self.update_anniversary_bonus()
+            
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"Bonus  for {self.policy_holder.first_name} {self.policy_holder.last_name} ({self.accrued_amount})"
-
-
+        return f"Bonus for {self.policy_holder.first_name} {self.policy_holder.last_name} ({self.accrued_amount})"
+        
+    class Meta:
+        verbose_name = "Bonus"
+        verbose_name_plural = "Bonuses"
+        indexes = [
+            models.Index(fields=['policy_holder']),
+            models.Index(fields=['last_updated']),
+        ]
 
 # claim requestes
 
@@ -785,6 +915,34 @@ class Underwriting(models.Model):
         default=False,
         help_text="Enable to manually update risk scores."
     )
+    premium_loading_percentage = models.DecimalField(
+        max_digits=5, decimal_places=2, default=0.00,
+        help_text="Additional premium percentage based on risk assessment."
+    )
+    underwriting_date = models.DateField(
+        default=date.today,
+        help_text="Date of initial underwriting."
+    )
+    last_reviewed_date = models.DateField(
+        null=True, blank=True,
+        help_text="Date of last underwriting review."
+    )
+    needs_review = models.BooleanField(
+        default=False,
+        help_text="Flag indicating this policy needs underwriting review."
+    )
+    medical_examination_required = models.BooleanField(
+        default=False,
+        help_text="Indicates if a medical examination is required."
+    )
+    medical_examination_completed = models.BooleanField(
+        default=False,
+        help_text="Indicates if required medical examination was completed."
+    )
+    additional_documents_required = models.TextField(
+        null=True, blank=True,
+        help_text="List of additional documents required for underwriting."
+    )
     remarks = models.TextField(
         null=True, blank=True, help_text="Additional remarks about underwriting."
     )
@@ -802,55 +960,296 @@ class Underwriting(models.Model):
             self.last_updated_by = 'System'
         else:
             self.last_updated_by = 'Admin'
+        
+        # Mark policy for review if high risk or special conditions
+        self.check_if_review_needed()
+        
+        # Set last reviewed date if this is a review
+        if self.pk and self.needs_review:
+            self.last_reviewed_date = date.today()
+            self.needs_review = False
+            
         super().save(*args, **kwargs)
+        
+        # Update policy holder risk category to match
+        if self.policy_holder.risk_category != self.risk_category:
+            self.policy_holder.risk_category = self.risk_category
+            self.policy_holder.save(update_fields=['risk_category'])
+        
+        # Recalculate premium if needed
+        self.update_premium_loading()
 
     def calculate_risk(self):
         """Automatically calculate the risk score based on policyholder data."""
         try:
-            age = self.policy_holder.age
-            occupation_risk = {
-                'Low': 10, 'Moderate': 20, 'High': 30
-            }.get(self.policy_holder.occupation.risk_category, 10)
-
-            # Age-based risk
-            age_risk = 5 if age < 30 else (15 if age <= 50 else 25)
-
-            # Health and lifestyle risks
+            policy_holder = self.policy_holder
+            age = policy_holder.age or 0
+            
+            # Base risk factors
+            risk_factors = {
+                'age': 0,
+                'occupation': 0,
+                'health': 0,
+                'lifestyle': 0,
+                'medical_history': 0,
+                'family_history': 0,
+                'location': 0,
+                'sum_assured': 0
+            }
+            
+            # Age-based risk (0-25 points)
+            if age < 30:
+                risk_factors['age'] = 5
+            elif age <= 40:
+                risk_factors['age'] = 10
+            elif age <= 50:
+                risk_factors['age'] = 15
+            elif age <= 60:
+                risk_factors['age'] = 20
+            else:
+                risk_factors['age'] = 25
+                
+            # Occupation risk (0-20 points)
+            if policy_holder.occupation:
+                if policy_holder.occupation.risk_category == 'Low':
+                    risk_factors['occupation'] = 5
+                elif policy_holder.occupation.risk_category == 'Moderate':
+                    risk_factors['occupation'] = 10
+                elif policy_holder.occupation.risk_category == 'High':
+                    risk_factors['occupation'] = 20
+            
+            # Health risks (0-30 points)
             health_risk = 0
-            if self.policy_holder.smoker:
-                health_risk += 20
-            if self.policy_holder.alcoholic:
+            if policy_holder.smoker:
                 health_risk += 15
-
-            # Final risk score
-            total_risk = age_risk + occupation_risk + health_risk
+            if policy_holder.alcoholic:
+                health_risk += 10
+                
+            # Exercise frequency (deduct up to 5 points)
+            if policy_holder.exercise_frequency == 'Daily':
+                health_risk -= 5
+            elif policy_holder.exercise_frequency == 'Several times a week':
+                health_risk -= 3
+            elif policy_holder.exercise_frequency == 'Once a week':
+                health_risk -= 1
+                
+            risk_factors['health'] = max(0, min(30, health_risk))
+            
+            # Lifestyle risk factors (0-10 points)
+            if policy_holder.work_environment_risk == 'High':
+                risk_factors['lifestyle'] += 10
+            elif policy_holder.work_environment_risk == 'Moderate':
+                risk_factors['lifestyle'] += 5
+                
+            # Medical history (0-15 points)
+            if policy_holder.health_history and len(policy_holder.health_history) > 0:
+                risk_factors['medical_history'] = 15
+                
+            # Family medical history (0-10 points)
+            if policy_holder.family_medical_history and len(policy_holder.family_medical_history) > 0:
+                risk_factors['family_history'] = 10
+                
+            # Location based risk (natural hazards) (0-5 points)
+            if policy_holder.natural_hazard_exposure == 'High':
+                risk_factors['location'] = 5
+            elif policy_holder.natural_hazard_exposure == 'Moderate':
+                risk_factors['location'] = 3
+                
+            # Sum assured risk (0-10 points based on policy size)
+            if policy_holder.sum_assured and policy_holder.policy:
+                sum_assured_ratio = policy_holder.sum_assured / policy_holder.policy.max_sum_assured
+                if sum_assured_ratio > 0.8:
+                    risk_factors['sum_assured'] = 10
+                elif sum_assured_ratio > 0.6:
+                    risk_factors['sum_assured'] = 7
+                elif sum_assured_ratio > 0.4:
+                    risk_factors['sum_assured'] = 4
+                elif sum_assured_ratio > 0.2:
+                    risk_factors['sum_assured'] = 2
+            
+            # Calculate total risk score (max 100)
+            total_risk = sum(risk_factors.values())
             self.risk_assessment_score = min(total_risk, 100)
+            
+            # Determine risk category
             self.risk_category = self.determine_risk_category()
+            
+            # Calculate premium loading based on risk
+            self.calculate_premium_loading()
+            
+            # Set medical examination requirement
+            self.medical_examination_required = (self.risk_assessment_score > 65 or age > 50)
+            
+            # Log the risk assessment process
+            logger.info(f"Underwriting risk assessment for policy_holder_id={policy_holder.id}: " +
+                      f"score={self.risk_assessment_score}, category={self.risk_category}, " +
+                      f"factors={risk_factors}")
+                
         except Exception as e:
-            raise ValidationError(f"Error calculating risk: {e}")
+            logger.error(f"Error calculating underwriting risk: {str(e)}")
+            raise ValidationError(f"Error calculating risk: {str(e)}")
 
     def determine_risk_category(self):
+        """Determine risk category based on risk score."""
         score = self.risk_assessment_score
-        return 'Low' if score < 40 else 'Moderate' if score < 70 else 'High'
+        if score < 30:
+            return 'Low'
+        elif score < 60:
+            return 'Moderate'
+        else:
+            return 'High'
+            
+    def calculate_premium_loading(self):
+        """Calculate premium loading percentage based on risk score."""
+        score = self.risk_assessment_score
+        
+        # No loading for low risk
+        if score < 30:
+            self.premium_loading_percentage = Decimal('0.00')
+        # 5-10% loading for moderate risk
+        elif score < 60:
+            self.premium_loading_percentage = Decimal('5.00') + ((score - 30) / 30) * Decimal('5.00')
+        # 10-25% loading for high risk
+        else:
+            self.premium_loading_percentage = Decimal('10.00') + ((score - 60) / 40) * Decimal('15.00')
+            
+        # Round to nearest 0.5%
+        self.premium_loading_percentage = (self.premium_loading_percentage * 2).quantize(Decimal('1.0')) / 2
+            
+    def update_premium_loading(self):
+        """Update premium calculations if loading has changed."""
+        try:
+            # Get the primary premium payment record
+            premium_payment = self.policy_holder.premium_payments.first()
+            
+            if premium_payment:
+                premium_payment.save()  # Trigger recalculation
+                logger.info(f"Updated premium for policy_holder_id={self.policy_holder.id} with loading {self.premium_loading_percentage}%")
+        except Exception as e:
+            logger.error(f"Error updating premium with loading: {str(e)}")
+            
+    def check_if_review_needed(self):
+        """Determine if this policy needs an underwriting review."""
+        # Always review high risk policies
+        if self.risk_category == 'High':
+            self.needs_review = True
+            return
+            
+        # Review if medical exam is required but not completed
+        if self.medical_examination_required and not self.medical_examination_completed:
+            self.needs_review = True
+            return
+            
+        # Check if it's time for periodic review (policy anniversary)
+        if self.last_reviewed_date:
+            today = date.today()
+            years_since_review = today.year - self.last_reviewed_date.year
+            
+            # Check if it's been at least a year since last review
+            if years_since_review >= 1:
+                # And it's within a month of the anniversary
+                if abs((today.month - self.last_reviewed_date.month)) <= 1:
+                    self.needs_review = True
+                    return
+                    
+        # No review needed
+        self.needs_review = False
 
     def __str__(self):
         return f"Underwriting for {self.policy_holder} ({self.risk_category})"
+        
+    class Meta:
+        verbose_name = "Underwriting"
+        verbose_name_plural = "Underwritings"
+        indexes = [
+            models.Index(fields=['risk_category']),
+            models.Index(fields=['needs_review']),
+        ]
 
 # Premium Payment Model
 
 class PremiumPayment(models.Model):
-    policy_holder = models.ForeignKey('PolicyHolder', on_delete=models.CASCADE, related_name='premium_payments')
-    annual_premium = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
-    interval_payment = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
-    total_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
-    paid_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)  # Amount to be added
-    next_payment_date = models.DateField(null=True, blank=True)
-    fine_due = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    total_premium = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
-    remaining_premium = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
-    gsv_value = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
-    ssv_value = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
-    payment_status = models.CharField(max_length=255, choices=PAYMENT_CHOICES, default='Unpaid')
+    """Model to track premium payments for a policy holder."""
+    policy_holder = models.ForeignKey(
+        PolicyHolder, 
+        on_delete=models.CASCADE, 
+        related_name='premium_payments'
+    )
+    annual_premium = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        default=0.00, 
+        help_text="Annual premium amount"
+    )
+    interval_payment = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        default=0.00, 
+        help_text="Payment amount per interval (e.g. monthly, quarterly)"
+    )
+    total_premium = models.DecimalField(
+        max_digits=15, 
+        decimal_places=2, 
+        default=0.00, 
+        help_text="Total premium for the policy duration"
+    )
+    total_paid = models.DecimalField(
+        max_digits=15, 
+        decimal_places=2, 
+        default=0.00, 
+        help_text="Total amount paid so far"
+    )
+    remaining_premium = models.DecimalField(
+        max_digits=15, 
+        decimal_places=2, 
+        default=0.00, 
+        help_text="Remaining premium to be paid"
+    )
+    payment_status = models.CharField(
+        max_length=20, 
+        choices=[
+            ('Unpaid', 'Unpaid'), 
+            ('Partially Paid', 'Partially Paid'), 
+            ('Paid', 'Paid'),
+            ('Overdue', 'Overdue'),
+        ], 
+        default='Unpaid'
+    )
+    next_payment_date = models.DateField(
+        null=True, 
+        blank=True, 
+        help_text="Due date for the next payment"
+    )
+    paid_amount = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        default=0.00, 
+        help_text="Amount being paid in this transaction"
+    )
+    fine_due = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        default=0.00, 
+        help_text="Late payment fine due"
+    )
+    fine_paid = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        default=0.00, 
+        help_text="Late payment fine that was paid"
+    )
+    gsv_value = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        default=0.00, 
+        help_text="Guaranteed Surrender Value"
+    )
+    ssv_value = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        default=0.00, 
+        help_text="Special Surrender Value"
+    )
 
     def calculate_premium(self):
         """Calculate total and interval premiums for the policy."""
@@ -860,7 +1259,12 @@ class PremiumPayment(models.Model):
             duration_years = self.policy_holder.duration_years
             age = self.policy_holder.age  # Ensure this field exists in PolicyHolder
 
+            logger.info(f"PREMIUM CALCULATION - Starting for policy_holder_id={self.policy_holder.id}, " +
+                       f"policy={policy}, sum_assured={sum_assured}, age={age}, duration={duration_years}")
+
             if not policy or not sum_assured or not age:
+                logger.error(f"PREMIUM CALCULATION - Missing required data: policy={policy}, " +
+                           f"sum_assured={sum_assured}, age={age}")
                 raise ValidationError("Policy, Sum Assured, and Age are required for premium calculation.")
 
             # Fetch mortality rate based on age range
@@ -870,52 +1274,202 @@ class PremiumPayment(models.Model):
             ).first()
 
             if not mortality_rate_obj:
+                logger.error(f"PREMIUM CALCULATION - No mortality rate found for age {age}")
                 return Decimal('0.00'), Decimal('0.00')  # Instead of returning None
 
             mortality_rate = Decimal(mortality_rate_obj.rate)
+            logger.info(f"PREMIUM CALCULATION - Found mortality rate: {mortality_rate} for age {age}")
 
             # Base premium calculation
             base_premium = (sum_assured * mortality_rate) / Decimal(1000)
+            logger.info(f"PREMIUM CALCULATION - Base premium: {base_premium}")
 
             # Fetch duration factor
             duration_factor_obj = DurationFactor.objects.filter(
                 min_duration__lte=duration_years,  
-                max_duration__gte=duration_years  
+                max_duration__gte=duration_years,
+                policy_type=policy.policy_type
             ).first()
 
             if not duration_factor_obj:
+                logger.error(f"PREMIUM CALCULATION - No duration factor found for duration {duration_years} and policy type {policy.policy_type}")
                 return Decimal('0.00'), Decimal('0.00') 
 
             duration_factor = Decimal(duration_factor_obj.factor)  
+            logger.info(f"PREMIUM CALCULATION - Found duration factor: {duration_factor}")
 
             # Adjust premium based on policy type
             if policy.policy_type == "Endownment":
                 adjusted_premium = base_premium * Decimal(policy.base_multiplier) * duration_factor
+                logger.info(f"PREMIUM CALCULATION - Endowment premium: {adjusted_premium} (base * {policy.base_multiplier} * {duration_factor})")
             elif policy.policy_type == "Term":
                 adjusted_premium = base_premium
+                logger.info(f"PREMIUM CALCULATION - Term premium: {adjusted_premium}")
             else:
+                logger.error(f"PREMIUM CALCULATION - Unsupported policy type: {policy.policy_type}")
                 raise ValidationError(f"Unsupported policy type: {policy.policy_type}")
 
             # Add ADB/PTD charges if applicable
             adb_charge = (sum_assured * Decimal(policy.adb_percentage)) / Decimal(100) if policy.include_adb else Decimal('0.00')
             ptd_charge = (sum_assured * Decimal(policy.ptd_percentage)) / Decimal(100) if policy.include_ptd else Decimal('0.00')
+            logger.info(f"PREMIUM CALCULATION - ADB charge: {adb_charge}, PTD charge: {ptd_charge}")
 
-            annual_premium = adjusted_premium + adb_charge + ptd_charge
+            # Apply underwriting loading if available
+            premium_loading = Decimal('0.00')
+            try:
+                if hasattr(self.policy_holder, 'underwriting'):
+                    underwriting = self.policy_holder.underwriting
+                    if underwriting.premium_loading_percentage > 0:
+                        premium_loading = (adjusted_premium * underwriting.premium_loading_percentage) / Decimal('100.00')
+                        logger.info(f"PREMIUM CALCULATION - Applied underwriting loading: {underwriting.premium_loading_percentage}% = {premium_loading}")
+            except Exception as e:
+                logger.warning(f"PREMIUM CALCULATION - Error applying underwriting loading: {str(e)}")
+
+            # Calculate final premium with all adjustments
+            annual_premium = adjusted_premium + adb_charge + ptd_charge + premium_loading
+            logger.info(f"PREMIUM CALCULATION - Annual premium (with loading): {annual_premium}")
 
             # Calculate interval payments
             interval_mapping = {"quarterly": 4, "semi_annual": 2, "annual": 1, "Single": 1}
             interval_count = interval_mapping.get(self.policy_holder.payment_interval, 1)
             interval_payment = annual_premium / Decimal(interval_count)
+            logger.info(f"PREMIUM CALCULATION - Interval payment: {interval_payment} (Annual / {interval_count})")
 
-            return annual_premium.quantize(Decimal('1.00')), interval_payment.quantize(Decimal('1.00'))
+            annual_premium = annual_premium.quantize(Decimal('1.00'))
+            interval_payment = interval_payment.quantize(Decimal('1.00'))
+            
+            logger.info(f"PREMIUM CALCULATION - RESULT: annual={annual_premium}, interval={interval_payment}")
+            return annual_premium, interval_payment
 
         except ValidationError as e:
-            raise ValidationError(f"Error calculating premium: {e}")
+            logger.error(f"PREMIUM CALCULATION - Validation error: {e}")
+            raise
 
-        return Decimal('0.00'), Decimal('0.00')  
+        except Exception as e:
+            logger.error(f"PREMIUM CALCULATION - Unexpected error: {str(e)}")
+            return Decimal('0.00'), Decimal('0.00')
+            
+    def add_payment(self, amount):
+        """Add a payment to the premium record"""
+        # Convert amount to Decimal if it's not already
+        if not isinstance(amount, Decimal):
+            try:
+                amount = Decimal(str(amount))
+            except (ValueError, TypeError):
+                raise ValidationError(f"Invalid payment amount: {amount}. Must be a valid number.")
+        
+        # Validate payment amount
+        if amount <= 0:
+            raise ValidationError("Payment amount must be greater than zero")
+            
+        # Calculate current payment due (interval payment + any fine)
+        current_fine = self.calculate_fine()
+        expected_amount = self.interval_payment
+        total_with_fine = expected_amount
+        
+        # Update fine due if needed
+        if current_fine > 0:
+            self.fine_due = current_fine
+            total_with_fine += current_fine
+            
+        # Reject if amount is less than expected
+        if amount < expected_amount:
+            raise ValidationError(f"Payment amount ({amount}) is less than required premium ({expected_amount})")
+        
+        # Check if payment includes fine
+        if amount > expected_amount and amount <= total_with_fine:
+            # This payment includes fine
+            self.fine_paid += (amount - expected_amount)
+            logger.info(f"Payment includes fine of {amount - expected_amount}")
+        elif amount > total_with_fine:
+            # Reject overpayment beyond fine amount
+            raise ValidationError(f"Payment amount ({amount}) exceeds required amount with fine ({total_with_fine}). Please make exact payments only.")
+            
+        # Check for already paid periods
+        if self.is_current_period_paid():
+            raise ValidationError("The current payment period has already been paid. Please wait until the next payment is due.")
+            
+        # Ensure all values are Decimal for safe operations
+        if isinstance(self.paid_amount, float):
+            self.paid_amount = Decimal(str(self.paid_amount))
+        if isinstance(self.total_paid, float):
+            self.total_paid = Decimal(str(self.total_paid))
+            
+        # Set the paid amount
+        self.paid_amount = amount
+        
+        # Reset fine due after payment
+        self.fine_due = Decimal('0.00')
+        
+        self.save()
+        
+        return True
+        
+    def save(self, *args, **kwargs):
+        if not self.pk:  # New instance
+            self.annual_premium, self.interval_payment = self.calculate_premium()
 
+            if self.policy_holder.payment_interval == "Single":
+                self.total_premium = self.interval_payment
+            else:
+                self.total_premium = self.annual_premium * Decimal(str(self.policy_holder.duration_years))
+
+        # Convert all monetary values to Decimal to prevent type errors
+        if isinstance(self.total_premium, float):
+            self.total_premium = Decimal(str(self.total_premium))
+        if isinstance(self.total_paid, float):
+            self.total_paid = Decimal(str(self.total_paid))
+        if isinstance(self.paid_amount, float):
+            self.paid_amount = Decimal(str(self.paid_amount))
+        if isinstance(self.fine_due, float):
+            self.fine_due = Decimal(str(self.fine_due))
+        if isinstance(self.fine_paid, float):
+            self.fine_paid = Decimal(str(self.fine_paid))
+    
+        # Handle new payment if paid_amount is provided
+        if self.paid_amount > 0:
+            # First add to total_paid
+            self.total_paid += self.paid_amount
+            self.paid_amount = Decimal('0.00')  # Reset paid_amount after adding to total_paid
         
+        # Update remaining premium (doesn't include fines)
+        self.remaining_premium = max(self.total_premium - self.total_paid, Decimal('0.00'))
+    
+        # Update payment status based on premium (not including fines)
+        if self.total_paid >= self.total_premium:
+            self.payment_status = 'Paid'
+        elif self.total_paid > 0:
+            self.payment_status = 'Partially Paid'
+        else:
+            self.payment_status = 'Unpaid'
+
+        # Calculate and apply fine if not already set
+        if self.fine_due <= 0:
+            self.fine_due = self.calculate_fine()
+
+        # Check for policy expiry due to non-payment
+        self.check_policy_expiry()
+
+        # Set next payment date if not already set
+        if not self.next_payment_date and self.policy_holder.payment_interval != "Single":
+            interval_months = {
+                "quarterly": 3,
+                "semi_annual": 6,
+                "annual": 12
+            }.get(self.policy_holder.payment_interval)
+
+            if interval_months:
+                today = date.today()
+                self.next_payment_date = today.replace(
+                    month=((today.month - 1 + interval_months) % 12) + 1,
+                    year=today.year + ((today.month - 1 + interval_months) // 12)
+            )
+         # --- New GSV and SSV Calculations ---
+        self.gsv_value = self.calculate_gsv()
+        self.ssv_value = self.calculate_ssv()
         
+        super().save(*args, **kwargs)
+
     def calculate_gsv(self):
         """Calculate Guaranteed Surrender Value (GSV)."""
         try:
@@ -961,71 +1515,147 @@ class PremiumPayment(models.Model):
             except Exception as e:
                 raise ValidationError(f"Error calculating SSV: {e}")
 
-    def save(self, *args, **kwargs):
-        if not self.pk:  # New instance
-            self.annual_premium, self.interval_payment = self.calculate_premium()
-
-            if self.policy_holder.payment_interval == "Single":
-                self.total_premium = self.interval_payment
-            else:
-                self.total_premium = self.annual_premium * Decimal(str(self.policy_holder.duration_years))
-
-        # Convert paid_amount to Decimal if it's not already
-        if isinstance(self.paid_amount, float):
-            self.paid_amount = Decimal(str(self.paid_amount))
-    
-        # Handle new payment if paid_amount is provided
-        if self.paid_amount > 0:
-            if isinstance(self.total_paid, float):
-                self.total_paid = Decimal(str(self.total_paid))
-            self.total_paid += self.paid_amount
-            self.paid_amount = Decimal('0.00')  # Reset paid_amount after adding to total_paid
+    def calculate_fine(self):
+        """Calculate late payment fine if applicable"""
+        if not self.next_payment_date:
+            return Decimal('0.00')
+            
+        today = date.today()
+        if today <= self.next_payment_date:
+            return Decimal('0.00')
+            
+        # Calculate days late
+        days_late = (today - self.next_payment_date).days
         
-        # Update remaining premium and payment status
-        self.remaining_premium = max(self.total_premium - self.total_paid, Decimal('0.00'))
-    
-        if self.total_paid >= self.total_premium:
-            self.payment_status = 'Paid'
-        elif self.total_paid > 0:
-            self.payment_status = 'Partially Paid'
-        else:
-            self.payment_status = 'Unpaid'
+        # Check grace period (15 days in Nepal standard practice)
+        if days_late <= 15:  # 15-day grace period
+            return Decimal('0.00')
+            
+        # Apply fine calculation - 1% per month after due date (Nepal standard)
+        monthly_rate = Decimal('0.01')  # 1% per month
+        daily_rate = monthly_rate / Decimal('30')  # Approximate daily rate
+        
+        # Fine applies after grace period
+        actual_days_late = days_late - 15
+        
+        # Ensure interval_payment is Decimal
+        if isinstance(self.interval_payment, float):
+            self.interval_payment = Decimal(str(self.interval_payment))
+            
+        fine = self.interval_payment * daily_rate * Decimal(str(actual_days_late))
+        return max(fine.quantize(Decimal('1.00')), Decimal('0.00'))
 
-        # Handle fine
-        if self.fine_due > 0:
-            if isinstance(self.fine_due, float):
-                self.fine_due = Decimal(str(self.fine_due))
-            if isinstance(self.interval_payment, float):
-                self.interval_payment = Decimal(str(self.interval_payment))
-                self.interval_payment += self.fine_due
-                self.fine_due = Decimal('0.00')
-
-        # Set next payment date
-        if not self.next_payment_date and self.policy_holder.payment_interval != "Single":
+    def is_current_period_paid(self):
+        """Check if the current period has already been paid"""
+        if not self.next_payment_date:
+            # If there's no next payment date set, initialize it based on policy start date
             interval_months = {
                 "quarterly": 3,
                 "semi_annual": 6,
-                "annual": 12
+                "annual": 12,
+                "Single": None  # Single payment policies are handled differently
             }.get(self.policy_holder.payment_interval)
-
-            if interval_months:
-                today = date.today()
-                self.next_payment_date = today.replace(
-                    month=((today.month - 1 + interval_months) % 12) + 1,
-                    year=today.year + ((today.month - 1 + interval_months) // 12)
+            
+            if not interval_months:
+                return self.payment_status == 'Paid'  # For single payments
+            
+            # Calculate the initial next payment date based on policy start date
+            today = date.today()
+            policy_start = self.policy_holder.start_date
+            
+            # Calculate first payment date: start date + interval
+            next_payment_date = policy_start.replace(
+                month=((policy_start.month - 1 + interval_months) % 12) + 1,
+                year=policy_start.year + ((policy_start.month - 1 + interval_months) // 12)
             )
-         # --- New GSV and SSV Calculations ---
-        self.gsv_value = self.calculate_gsv()
-        self.ssv_value = self.calculate_ssv()
-        super().save(*args, **kwargs)
+            
+            # Check if we need to calculate future periods based on difference
+            if today > next_payment_date:
+                # Calculate how many periods have passed
+                months_diff = (today.year - next_payment_date.year) * 12 + today.month - next_payment_date.month
+                periods_passed = months_diff // interval_months
+                
+                if periods_passed > 0:
+                    # Adjust next payment date based on periods passed
+                    next_payment_date = next_payment_date.replace(
+                        month=((next_payment_date.month - 1 + (interval_months * periods_passed)) % 12) + 1,
+                        year=next_payment_date.year + ((next_payment_date.month - 1 + (interval_months * periods_passed)) // 12)
+                    )
+            
+            # Set the calculated next payment date
+            self.next_payment_date = next_payment_date
+            self.save(update_fields=['next_payment_date'])
+            return False  # New or initialized payment date is never "already paid"
+        
+        # If next payment date is in the future, current period is paid
+        today = date.today()
+        interval_months = {
+            "quarterly": 3,
+            "semi_annual": 6,
+            "annual": 12,
+            "Single": None  # Single payment policies are handled differently
+        }.get(self.policy_holder.payment_interval)
+        
+        if not interval_months:
+            return self.payment_status == 'Paid'  # For single payments
+            
+        # Calculate the previous payment date
+        last_payment_date = self.next_payment_date.replace(
+            month=((self.next_payment_date.month - interval_months - 1) % 12) + 1,
+            year=self.next_payment_date.year - ((self.next_payment_date.month - interval_months <= 0) and 1 or 0)
+        )
+        
+        # If today is after last payment date but before next payment date, current period is paid
+        return today > last_payment_date and today < self.next_payment_date
+
+    def check_policy_expiry(self):
+        """Check if policy should be expired due to long-term non-payment (3 years in Nepal)"""
+        if self.payment_status == 'Paid' or self.policy_holder.status in ['Expired', 'Surrendered']:
+            return False
+        
+        today = date.today()
+        
+        # If next payment date not set, calculate it based on policy start
+        if not self.next_payment_date:
+            interval_months = {
+                "quarterly": 3,
+                "semi_annual": 6,
+                "annual": 12,
+                "Single": None
+            }.get(self.policy_holder.payment_interval)
+            
+            if not interval_months:
+                return False  # Single payment policy can't expire due to missed regular payments
+            
+            policy_start = self.policy_holder.start_date
+            self.next_payment_date = policy_start.replace(
+                month=((policy_start.month - 1 + interval_months) % 12) + 1,
+                year=policy_start.year + ((policy_start.month - 1 + interval_months) // 12)
+            )
+        
+        # Calculate days late
+        days_late = (today - self.next_payment_date).days
+        
+        # 3 years of non-payment leads to policy expiry (1095 days ≈ 3 years)
+        if days_late > 1095:
+            # Update both premium payment and policy holder statuses
+            self.policy_holder.status = 'Expired'
+            self.policy_holder.save(update_fields=['status'])
+            self.payment_status = 'Expired'
+            # Don't call self.save() here to avoid recursion
+            # Just return True to indicate expiry
+            logger.info(f"Policy {self.policy_holder.id} has expired due to {days_late} days of non-payment")
+            return True
+        
+        return False
+
+    def __str__(self):
+        return f"Premium Payment - {self.policy_holder.first_name} {self.policy_holder.last_name} ({self.payment_status})"
+
     class Meta:
         verbose_name = "Premium Payment"
         verbose_name_plural = "Premium Payments"
-    
-    def __str__(self):
-       return f"Premium Payment - {self.policy_holder.first_name} {self.policy_holder.last_name} ({self.payment_status})"
 
-        
 # Agent Report
 class AgentReport(models.Model):
     agent = models.ForeignKey(SalesAgent, on_delete=models.CASCADE)
@@ -1034,15 +1664,19 @@ class AgentReport(models.Model):
     report_date = models.DateField()
     reporting_period = models.CharField(max_length=20)
     policies_sold = models.IntegerField(default=0)
-    total_premium = models.DecimalField(max_digits=12, decimal_places=2)
-    commission_earned = models.DecimalField(max_digits=10, decimal_places=2)
-    target_achievement = models.DecimalField(max_digits=5, decimal_places=2)
-    renewal_rate = models.DecimalField(max_digits=5, decimal_places=2)
-    customer_retention = models.DecimalField(max_digits=5, decimal_places=2)
+    total_premium = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    commission_earned = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total_commission = models.DecimalField(max_digits=12, decimal_places=2, default=0, 
+                                        help_text="Total commission earned from premium payments")
+    target_achievement = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    renewal_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    customer_retention = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    month = models.IntegerField(default=1)
+    year = models.IntegerField(default=2000)
 
     def __str__(self):
         return f"Report for {self.agent} on {self.report_date}"
-
+    
     class Meta:
         verbose_name = 'Agent Report'
         verbose_name_plural = 'Agent Reports'
@@ -1242,3 +1876,51 @@ class OTP(models.Model):
         )
         
         return otp
+
+class Commission(models.Model):
+    """Model to track agent commissions for premium payments."""
+    agent = models.ForeignKey(
+        'SalesAgent', 
+        on_delete=models.CASCADE, 
+        related_name='commissions'
+    )
+    policy_holder = models.ForeignKey(
+        'PolicyHolder', 
+        on_delete=models.CASCADE, 
+        related_name='commissions'
+    )
+    amount = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        help_text="Commission amount"
+    )
+    date = models.DateField(
+        help_text="Date commission was recorded"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ('Pending', 'Pending'),
+            ('Paid', 'Paid'),
+            ('Rejected', 'Rejected')
+        ],
+        default='Pending'
+    )
+    payment_date = models.DateField(
+        null=True, 
+        blank=True, 
+        help_text="Date commission was paid"
+    )
+    notes = models.TextField(
+        blank=True, 
+        null=True, 
+        help_text="Additional notes about this commission"
+    )
+    
+    def __str__(self):
+        return f"Commission {self.amount} for {self.agent.first_name} - {self.policy_holder.policy_number}"
+    
+    class Meta:
+        verbose_name = "Commission"
+        verbose_name_plural = "Commissions"
+        ordering = ['-date']
