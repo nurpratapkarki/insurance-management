@@ -13,6 +13,7 @@ import logging
 from django.utils import timezone
 import random
 
+
 logger = logging.getLogger(__name__)
 from .constants import (
     GENDER_CHOICES,
@@ -21,8 +22,6 @@ from .constants import (
     PROVINCE_CHOICES,
     REASON_CHOICES,
     STATUS_CHOICES,
-    TIME_PERIOD_CHOICES,
-    PROCESSING_STATUS_CHOICES,
     EMPLOYEE_STATUS_CHOICES,
     EXE_FREQ_CHOICE,
     RISK_CHOICES,
@@ -42,7 +41,7 @@ class Occupation(models.Model):
     )
 
     def __str__(self):
-        return self.name
+        return f"{self.name} ({self.risk_category})"
     
 class MortalityRate(models.Model):
     
@@ -129,7 +128,7 @@ class InsurancePolicy(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return self.name
+        return f"{self.name} ({self.policy_type})"
 
     class Meta:
         verbose_name = "Insurance Policy"
@@ -138,6 +137,12 @@ class InsurancePolicy(models.Model):
         super().clean()
         if self.policy_type == "Term" and self.base_multiplier != 1.0:
             raise ValidationError("Base multiplier for Term insurance must always be 1.0.")
+        if self.min_sum_assured > self.max_sum_assured:
+            raise ValidationError("Minimum sum assured cannot be greater than maximum sum assured")
+        if self.include_adb and self.adb_percentage <= 0:
+            raise ValidationError("ADB percentage must be greater than 0 when ADB is included")
+        if self.include_ptd and self.ptd_percentage <= 0:
+            raise ValidationError("PTD percentage must be greater than 0 when PTD is included")
 #Guranteed Surrender Value
 class GSVRate(models.Model):
     policy = models.ForeignKey('InsurancePolicy', on_delete=models.CASCADE, related_name='gsv_rates')
@@ -147,8 +152,12 @@ class GSVRate(models.Model):
 
     def clean(self):
         """Ensure the year range is valid and does not overlap with other GSV ranges."""
-        if self.min_year >= self.max_year:
-            raise ValidationError("Minimum year must be less than maximum year.")
+        if self.min_year > self.max_year:
+            raise ValidationError("Minimum year cannot be greater than maximum year")
+        if self.rate < 0:
+            raise ValidationError("Rate cannot be negative")
+        if self.rate > 100:
+            raise ValidationError("Rate cannot be greater than 100%")
 
     
 
@@ -172,7 +181,7 @@ class GSVRate(models.Model):
             raise ValidationError("GSV year ranges cannot overlap for the same policy.")
 
     def __str__(self):
-        return f"GSV Rate {self.rate}% for {self.min_year}-{self.max_year} years"
+        return f"{self.policy.name} - {self.min_year}-{self.max_year} years ({self.rate}%)"
 
 # SSv Factor
 class SSVConfig(models.Model):
@@ -198,7 +207,7 @@ class SSVConfig(models.Model):
             raise ValidationError("SSV year ranges cannot overlap for the same policy.")
 
     def __str__(self):
-        return f"SSV Factor {self.ssv_factor}% for {self.min_year}-{self.max_year} years"
+        return f"{self.policy.name} - {self.min_year}-{self.max_year} years ({self.ssv_factor}%)"
 
 
 #  Agent Application
@@ -253,7 +262,8 @@ class AgentApplication(models.Model):
         verbose_name = 'Agent Application'
         verbose_name_plural = 'Agent Applications'
         indexes = [
-            models.Index(fields=['branch']),
+            models.Index(fields=['email']),
+            models.Index(fields=['phone_number']),
             models.Index(fields=['status']),
         ]
 
@@ -274,7 +284,6 @@ class SalesAgent(models.Model):
         null=True,
         blank=True
     )
-
     agent_code = models.CharField(max_length=50, unique=True, default=1)
     is_active = models.BooleanField(default=True)
     joining_date = models.DateField(default=date.today)
@@ -289,7 +298,6 @@ class SalesAgent(models.Model):
         max_length=200, null=True, blank=True)
     phone_number = models.CharField(max_length=15, unique=True)
     email = models.EmailField(max_length=200, null=True, blank=True)
-
     status = models.CharField(
         max_length=20, choices=EMPLOYEE_STATUS_CHOICES, default='ACTIVE')
 
@@ -307,8 +315,8 @@ class SalesAgent(models.Model):
         verbose_name = 'Sales Agent'
         verbose_name_plural = 'Sales Agents'
         indexes = [
-            models.Index(fields=['branch']),
-            models.Index(fields=['total_policies_sold']),
+            models.Index(fields=['agent_code']),
+            models.Index(fields=['phone_number']),
             models.Index(fields=['status']),
         ]
         
@@ -337,7 +345,7 @@ class DurationFactor(models.Model):
             raise ValidationError("Duration ranges cannot overlap for the same policy type")
 
     def __str__(self):
-        return f"{self.policy_type} ({self.min_duration}-{self.max_duration} years): {self.factor}x"
+        return f"{self.policy_type} - {self.min_duration}-{self.max_duration} years ({self.factor})"
 
 #policy holders start
 
@@ -371,7 +379,6 @@ class PolicyHolder(models.Model):
         max_length=200, blank=True, null=True)
     emergency_contact_number = models.CharField(
         max_length=15, blank=True, null=True)
-
     document_number = models.CharField(
         max_length=50, 
         default=1
@@ -387,7 +394,6 @@ class PolicyHolder(models.Model):
         upload_to='policy_holders', null=True, blank=True)
     pan_back = models.ImageField(
         upload_to='policy_holders', null=True, blank=True)
-
     pp_photo = models.ImageField(
         upload_to='policyHolder')
     dietary_habits = models.TextField(blank=True, null=True)
@@ -420,9 +426,6 @@ class PolicyHolder(models.Model):
     choices=RISK_CHOICES, 
         blank=True, 
     null=True)    
-    policy = models.ForeignKey(
-        InsurancePolicy, related_name='policy_holders', on_delete=models.CASCADE, blank=True, null=True
-    )
     health_history = models.CharField(max_length=500, null=True, blank=True)
     habits = models.CharField(max_length=500, null=True, blank=True)
     exercise_frequency = models.CharField(
@@ -464,10 +467,7 @@ class PolicyHolder(models.Model):
     payment_status = models.CharField(
         max_length=50, choices=PAYMENT_CHOICES, default="Unpaid")
     start_date = models.DateField(default=date.today)
-
     maturity_date = models.DateField(null=True, blank=True)
-    
-    # Nepal Regulatory Fields
     beema_samiti_reg_number = models.CharField(
         max_length=50, 
         blank=True, 
@@ -490,12 +490,12 @@ class PolicyHolder(models.Model):
         help_text="Date when policy was approved by regulatory authority"
     )
     tax_status = models.CharField(
-        max_length=20,
+        max_length=50,
         choices=[('Exempt', 'Tax Exempt'), ('Taxable', 'Taxable')],
         default='Taxable',
-        help_text="Tax status for premium payments and benefits"
+        help_text="Tax status of the policy"
     )
-    
+
     def clean(self):
         errors = {}
         if self.sum_assured:
@@ -519,7 +519,6 @@ class PolicyHolder(models.Model):
         return None
 
     def calculate_maturity_date(self):
-        """Calculate maturity date based on start date and duration"""
         if self.start_date and self.duration_years:
             return self.start_date.replace(year=self.start_date.year + self.duration_years)
         return None
@@ -945,7 +944,7 @@ class ClaimProcessing(models.Model):
         """Finalize claim based on approval."""
         if self.processing_status == 'Approved':
             PaymentProcessing.objects.create(
-                company=self.company,
+                branch=self.branch,
                 name=f"Claim Settlement - {self.claim_request.policy_holder}",
                 claim_request=self.claim_request,
                 processing_status='Completed',
@@ -1540,116 +1539,97 @@ class PremiumPayment(models.Model):
         if amount <= 0:
             raise ValidationError("Payment amount must be greater than zero.")
         
-        # Get the expected amount (current interval payment + any due fine)
+        # Get the expected amount (current interval payment)
         expected_amount = self.interval_payment
-        total_with_fine = expected_amount + self.fine_due
+        
+        # Check if there are outstanding fines from previous periods
+        has_fine = self.fine_due > Decimal('0.00')
         
         # Handle payment cases
         if amount < expected_amount:
-            # Partial payment not accepted
-            raise ValidationError(f"Payment amount ({amount}) is less than the required amount ({expected_amount}). Please pay the full amount.")
-        elif amount > expected_amount and amount <= total_with_fine:
-            # Payment includes fine
-            self.fine_paid += (amount - expected_amount)
-            logger.info(f"Payment includes fine of {amount - expected_amount}")
-        elif amount > total_with_fine:
-            # Reject overpayment beyond fine amount
-            raise ValidationError(f"Payment amount ({amount}) exceeds required amount with fine ({total_with_fine}). Please make exact payments only.")
-            
+            # Partial payment not accepted for regular premiums
+            raise ValidationError(f"Payment amount ({amount}) is less than the required premium ({expected_amount}). Please pay at least the full premium amount.")
+        
+        # Check for overpayment of total premium
+        remaining_for_total = self.total_premium - self.total_paid
+        if amount > remaining_for_total and remaining_for_total > 0:
+            raise ValidationError(f"Payment amount ({amount}) exceeds the remaining total premium ({remaining_for_total}). Please pay only the remaining amount.")
+        
+        # Check if already fully paid
+        if self.total_paid >= self.total_premium:
+            raise ValidationError("This policy is already fully paid. No additional payments are required.")
+        
         # Check for already paid periods
         if self.is_current_period_paid():
-            raise ValidationError("The current payment period has already been paid. Please wait until the next payment is due.")
-            
+            if has_fine:
+                # Allow payment just for the fine
+                if amount > self.fine_due:
+                    raise ValidationError(f"You have a fine of {self.fine_due} due. Please pay exactly this amount.")
+                # Accept fine payment
+                self.fine_paid += amount
+                self.fine_due = Decimal('0.00')
+                self.paid_amount = amount
+                self.save()
+                return True
+            else:
+                raise ValidationError("The current payment period has already been paid. Please wait until the next payment is due.")
+        
         # Ensure all values are Decimal for safe operations
         if isinstance(self.paid_amount, float):
             self.paid_amount = Decimal(str(self.paid_amount))
         if isinstance(self.total_paid, float):
             self.total_paid = Decimal(str(self.total_paid))
-            
+        
         # Set the paid amount
         self.paid_amount = amount
         
-        # Reset fine due after payment
-        self.fine_due = Decimal('0.00')
+        # Record any unpaid fine to be added to the next payment
+        if has_fine and amount == expected_amount:
+            # Just pay the premium and leave the fine for next period
+            logger.info(f"Fine of {self.fine_due} will be carried over to next payment period")
+        elif has_fine and amount > expected_amount:
+            # Pay premium and part/all of the fine
+            fine_payment = min(amount - expected_amount, self.fine_due)
+            self.fine_paid += fine_payment
+            self.fine_due -= fine_payment
+            logger.info(f"Payment includes fine of {fine_payment}. Remaining fine: {self.fine_due}")
+        
+        # Update next payment date and include any remaining fine
+        self.update_next_payment_date()
         
         self.save()
         
         return True
-    
-    # Modify the save method to include tax calculations
-    def save(self, *args, **kwargs):
-        if not self.pk:  # New instance
-            self.annual_premium, self.interval_payment = self.calculate_premium()
 
-            if self.policy_holder.payment_interval == "Single":
-                self.total_premium = self.interval_payment
-            else:
-                self.total_premium = self.annual_premium * Decimal(str(self.policy_holder.duration_years))
-
-        # Convert all monetary values to Decimal to prevent type errors
-        if isinstance(self.total_premium, float):
-            self.total_premium = Decimal(str(self.total_premium))
-        if isinstance(self.total_paid, float):
-            self.total_paid = Decimal(str(self.total_paid))
-        if isinstance(self.paid_amount, float):
-            self.paid_amount = Decimal(str(self.paid_amount))
-        if isinstance(self.fine_due, float):
-            self.fine_due = Decimal(str(self.fine_due))
-        if isinstance(self.fine_paid, float):
-            self.fine_paid = Decimal(str(self.fine_paid))
-    
-        # Handle new payment if paid_amount is provided
-        if self.paid_amount > 0:
-            # Calculate taxes
-            self.calculate_taxes()
-            
-            # Generate receipt number if not provided
-            if not self.receipt_number:
-                timestamp = timezone.now().strftime('%Y%m%d%H%M%S')
-                self.receipt_number = f"RCP-{self.policy_holder.policy_number}-{timestamp}"
-                
-            # First add to total_paid
-            self.total_paid += self.paid_amount
-            self.paid_amount = Decimal('0.00')  # Reset paid_amount after adding to total_paid
+    def update_next_payment_date(self):
+        """Update the next payment date based on the payment interval"""
+        if self.policy_holder.payment_interval == "Single":
+            # No next payment date for single payment policies
+            return
         
-        # Update remaining premium (doesn't include fines)
-        self.remaining_premium = max(self.total_premium - self.total_paid, Decimal('0.00'))
-    
-        # Update payment status based on premium (not including fines)
-        if self.total_paid >= self.total_premium:
-            self.payment_status = 'Paid'
-        elif self.total_paid > 0:
-            self.payment_status = 'Partially Paid'
-        else:
-            self.payment_status = 'Unpaid'
-
-        # Calculate and apply fine if not already set
-        if self.fine_due <= 0:
-            self.fine_due = self.calculate_fine()
-
-        # Check for policy expiry due to non-payment
-        self.check_policy_expiry()
-
-        # Set next payment date if not already set
-        if not self.next_payment_date and self.policy_holder.payment_interval != "Single":
-            interval_months = {
-                "quarterly": 3,
-                "semi_annual": 6,
-                "annual": 12
-            }.get(self.policy_holder.payment_interval)
-
-            if interval_months:
-                today = date.today()
-                self.next_payment_date = today.replace(
-                    month=((today.month - 1 + interval_months) % 12) + 1,
-                    year=today.year + ((today.month - 1 + interval_months) // 12)
+        interval_months = {
+            "quarterly": 3,
+            "semi_annual": 6,
+            "annual": 12
+        }.get(self.policy_holder.payment_interval)
+        
+        if not interval_months:
+            return
+        
+        if self.next_payment_date:
+            # Calculate next payment date from the current one
+            self.next_payment_date = self.next_payment_date.replace(
+                month=((self.next_payment_date.month - 1 + interval_months) % 12) + 1,
+                year=self.next_payment_date.year + ((self.next_payment_date.month - 1 + interval_months) // 12)
             )
-         # --- New GSV and SSV Calculations ---
-        self.gsv_value = self.calculate_gsv()
-        self.ssv_value = self.calculate_ssv()
-            
-        super().save(*args, **kwargs)
-
+        else:
+            # If there's no next payment date, calculate from today
+            today = date.today()
+            self.next_payment_date = today.replace(
+                month=((today.month - 1 + interval_months) % 12) + 1,
+                year=today.year + ((today.month - 1 + interval_months) // 12)
+            )
+    
     def calculate_gsv(self):
         """Calculate Guaranteed Surrender Value (GSV)."""
         try:
@@ -2514,3 +2494,62 @@ class PolicyRenewal(models.Model):
             models.Index(fields=['status']),
             models.Index(fields=['due_date']),
         ]
+
+def save(self, *args, **kwargs):
+    if not self.pk:  # New instance
+        self.annual_premium, self.interval_payment = self.calculate_premium()
+
+        if self.policy_holder.payment_interval == "Single":
+            self.total_premium = self.interval_payment
+        else:
+            self.total_premium = self.annual_premium * Decimal(str(self.policy_holder.duration_years))
+
+    # Convert all monetary values to Decimal to prevent type errors
+    if isinstance(self.total_premium, float):
+        self.total_premium = Decimal(str(self.total_premium))
+    if isinstance(self.total_paid, float):
+        self.total_paid = Decimal(str(self.total_paid))
+    if isinstance(self.paid_amount, float):
+        self.paid_amount = Decimal(str(self.paid_amount))
+    if isinstance(self.fine_due, float):
+        self.fine_due = Decimal(str(self.fine_due))
+    if isinstance(self.fine_paid, float):
+        self.fine_paid = Decimal(str(self.fine_paid))
+
+    # Handle new payment if paid_amount is provided
+    if self.paid_amount > 0:
+        # Calculate taxes
+        self.calculate_taxes()
+        
+        # Generate receipt number if not provided
+        if not self.receipt_number:
+            timestamp = timezone.now().strftime('%Y%m%d%H%M%S')
+            self.receipt_number = f"RCP-{self.policy_holder.policy_number}-{timestamp}"
+            
+        # First add to total_paid
+        self.total_paid += self.paid_amount
+        self.paid_amount = Decimal('0.00')  # Reset paid_amount after adding to total_paid
+    
+    # Update remaining premium (doesn't include fines)
+    self.remaining_premium = max(self.total_premium - self.total_paid, Decimal('0.00'))
+
+    # Update payment status based on premium (not including fines)
+    if self.total_paid >= self.total_premium:
+        self.payment_status = 'Paid'
+    elif self.total_paid > 0:
+        self.payment_status = 'Partially Paid'
+    else:
+        self.payment_status = 'Unpaid'
+
+    # Calculate and apply fine if not already set and no existing fine
+    if self.fine_due <= 0:
+        self.fine_due = self.calculate_fine()
+
+    # Check for policy expiry due to non-payment
+    self.check_policy_expiry()
+
+    # --- New GSV and SSV Calculations ---
+    self.gsv_value = self.calculate_gsv()
+    self.ssv_value = self.calculate_ssv()
+        
+    super().save(*args, **kwargs)

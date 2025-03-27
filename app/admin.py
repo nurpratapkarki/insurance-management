@@ -25,7 +25,7 @@ from .models import (
     ClaimRequest, ClaimProcessing, PremiumPayment,MortalityRate,
     EmployeePosition, Employee, PaymentProcessing, Branch, Company, AgentReport, AgentApplication, Occupation, DurationFactor, GSVRate, SSVConfig, Bonus, BonusRate, Loan, LoanRepayment,UserProfile, OTP, Commission, PolicySurrender, PolicyRenewal
 )
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation as DecimalException
 import logging
 from django.utils.translation import gettext_lazy as _
 from django.template.response import TemplateResponse
@@ -77,7 +77,7 @@ class GSVRateInline(admin.TabularInline):
 class SSVConfigInline(admin.TabularInline):
     model = SSVConfig
     extra = 0
-
+    
 # Register Insurance Policy
 @admin.register(InsurancePolicy)
 class InsurancePolicyAdmin(admin.ModelAdmin):
@@ -108,7 +108,7 @@ class ClaimRequestAdmin(admin.ModelAdmin, BranchFilterMixin):
     list_display = ('policy_holder', 'claim_date', 'status', 'claim_amount', 'print_button')
     readonly_fields = ('claim_amount',)
     search_fields = ('policy_holder__first_name', 'policy_holder__last_name')
-
+    
     def get_urls(self):
         urls = super().get_urls()
         custom_urls = [
@@ -170,32 +170,187 @@ class PremiumPaymentForm(forms.ModelForm):
                 lambda obj: f"{obj.policy_number} - {obj.first_name} {obj.last_name}"
             )
             self.fields['policy_holder'].to_field_name = 'policy_number'  # Use policy_number as the value
-
+    
 # Register Premium Payment
 
 @admin.register(PremiumPayment)
-class PremiumPaymentAdmin(admin.ModelAdmin):
-    list_display = (
-        'policy_holder', 'annual_premium', 'total_premium', 'interval_payment',
-        'total_paid', 'fine_due', 'fine_paid', 'payment_status', 'next_payment_date'
-    )
-    list_filter = ('payment_status', 'policy_holder__payment_interval')
+class PremiumPaymentAdmin(admin.ModelAdmin, BranchFilterMixin):
+    list_display = ('policy_holder', 'annual_premium', 'interval_payment', 'total_premium',
+                    'total_paid', 'payment_status', 'next_payment_date', 'fine_status', 'action_buttons')
+    readonly_fields = ('annual_premium', 'gsv_value', 'ssv_value', 'total_premium', 'total_paid',
+                       'remaining_premium', 'payment_status', 'next_payment_date', 'fine_due', 'fine_paid')
     search_fields = ('policy_holder__first_name', 'policy_holder__last_name', 'policy_holder__policy_number')
-    readonly_fields = (
-        'annual_premium', 'interval_payment', 'total_premium',
-        'remaining_premium','total_paid', 'fine_paid', 'gsv_value', 'ssv_value'
-    )
-    
+    list_filter = ('payment_status',)
     actions = ['add_payment', 'check_policy_expiry']
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        if not request.user.is_superuser:
-            return qs.filter(policy_holder__branch=request.user.profile.branch)
-        return qs
+        if request.user.is_superuser:
+            return qs
+        branch = getattr(request.user.profile, 'branch', None)
+        return qs.filter(policy_holder__branch=branch) if branch else qs.none()
+        
+    def action_buttons(self, obj):
+        """Generate action buttons for premium payments"""
+        buttons = []
+        
+        # Payment button
+        if obj.payment_status != 'Paid' and obj.policy_holder.status not in ['Surrendered', 'Expired']:
+            payment_amount = obj.interval_payment
+            
+            # Show different payment options if there's a fine
+            if obj.fine_due > 0:
+                # Option 1: Pay premium only
+                buttons.append(
+                    f'<a class="button" href="#" onclick="makePayment({obj.id}, {payment_amount})" '
+                    f'style="background-color: #3498db; color: white; margin-right: 5px;">'
+                    f'Pay Premium (₹{payment_amount})</a>'
+                )
+                
+                # Option 2: Pay premium + fine
+                total_with_fine = payment_amount + obj.fine_due
+                buttons.append(
+                    f'<a class="button" href="#" onclick="makePayment({obj.id}, {total_with_fine})" '
+                    f'style="background-color: #e74c3c; color: white; margin-right: 5px;">'
+                    f'Pay Premium + Fine (₹{total_with_fine})</a>'
+                )
+                
+                # Option 3: Pay fine only (if current period is already paid)
+                if obj.is_current_period_paid():
+                    buttons.append(
+                        f'<a class="button" href="#" onclick="makePayment({obj.id}, {obj.fine_due})" '
+                        f'style="background-color: #f39c12; color: white;">'
+                        f'Pay Fine Only (₹{obj.fine_due})</a>'
+                    )
+            else:
+                # Standard payment button
+                buttons.append(
+                    f'<a class="button" href="#" onclick="makePayment({obj.id}, {payment_amount})" '
+                    f'style="background-color: #2ecc71; color: white;">'
+                    f'Make Payment (₹{payment_amount})</a>'
+                )
+        
+        # Add custom JavaScript for payment actions
+        if buttons:
+            js = '''
+            <script type="text/javascript">
+                function makePayment(id, amount) {
+                    if (confirm("Process payment of ₹" + amount + "?")) {
+                        window.location.href = "/admin/app/premiumpayment/" + id + "/payment/?amount=" + amount;
+                    }
+                }
+            </script>
+            '''
+            buttons.append(js)
+            
+        return format_html(''.join(buttons))
+    
+    action_buttons.short_description = "Actions"
+    
+    def fine_status(self, obj):
+        """Display fine status with visual indicator"""
+        if obj.fine_due > 0:
+            return format_html(
+                '<span style="color: #e74c3c; font-weight: bold;">'
+                'Fine Due: ₹{}</span>',
+                obj.fine_due
+            )
+        elif obj.fine_paid > 0:
+            return format_html(
+                '<span style="color: #27ae60;">Fine Paid: Nrs. {}</span>',
+                obj.fine_paid
+            )
+        return format_html('<span style="color: #7f8c8d;">No Fine</span>')
+    
+    fine_status.short_description = "Fine Status"
+    
+    def get_urls(self):
+        urls = super().get_urls()
+        my_urls = [
+            path('<path:object_id>/payment/', 
+                 self.admin_site.admin_view(self.process_payment),
+                 name='premiumpayment_payment'),
+        ]
+        return my_urls + urls
+    
+    def process_payment(self, request, object_id):
+        """Process a payment for a premium payment record"""
+        try:
+            payment = self.get_queryset(request).get(pk=object_id)
+            
+            if 'amount' in request.GET:
+                try:
+                    amount = Decimal(request.GET.get('amount'))
+                    try:
+                        payment.add_payment(amount)
+                        messages.success(request, f"Payment of ₹{amount} recorded successfully.")
+                    except ValidationError as e:
+                        messages.error(request, str(e))
+                except (ValueError, DecimalException):
+                    messages.error(request, "Invalid payment amount")
+            
+            return redirect('admin:app_premiumpayment_change', object_id)
+        
+        except PremiumPayment.DoesNotExist:
+            messages.error(request, "Premium payment record not found")
+            return redirect('admin:app_premiumpayment_changelist')
+    
+    @admin.action(description="Record payments for selected policies")
+    def add_payment(self, request, queryset):
+        """Action to record payments for selected premium payment records"""
+        success_count = 0
+        error_count = 0
+        
+        for payment in queryset:
+            # Skip surrendered or expired policies
+            if payment.policy_holder.status in ['Surrendered', 'Expired']:
+                messages.warning(request, f"Payment for {payment.policy_holder} skipped: Policy is {payment.policy_holder.status}")
+                error_count += 1
+                continue
+                
+            try:
+                # Calculate fine if applicable
+                fine = payment.calculate_fine()
+                payment_amount = payment.interval_payment
+                
+                # Try to process the payment
+                if payment.add_payment(payment_amount):
+                    success_count += 1
+                    messages.info(request, f"Payment of ₹{payment_amount} recorded for {payment.policy_holder}")
+                    
+                    # If there's remaining fine, inform the user
+                    if payment.fine_due > 0:
+                        messages.warning(request, 
+                            f"Fine of ₹{payment.fine_due} for {payment.policy_holder} has been carried over to the next payment period")
+            except ValidationError as e:
+                messages.error(request, f"Error processing payment for {payment.policy_holder}: {str(e)}")
+                error_count += 1
+            except Exception as e:
+                messages.error(request, f"Unexpected error for {payment.policy_holder}: {str(e)}")
+                error_count += 1
+                
+        if success_count > 0:
+            messages.success(request, f"Successfully recorded {success_count} payments")
+        if error_count > 0:
+            messages.warning(request, f"Failed to record {error_count} payments")
 
+    @admin.action(description="Check selected policies for expiry")
+    def check_policy_expiry(self, request, queryset):
+        """Check if policies have expired due to non-payment"""
+        checked = 0
+        expired = 0
+        
+        for payment in queryset:
+            checked += 1
+            if payment.check_policy_expiry():
+                expired += 1
+                
+        if expired > 0:
+            messages.warning(request, f"Checked {checked} policies. {expired} policies marked as expired due to non-payment.")
+        else:
+            messages.success(request, f"Checked {checked} policies. No expired policies found.")
+        
     def get_form(self, request, obj=None, **kwargs):
-        """Initialize form with calculated premium values"""
         form = super().get_form(request, obj, **kwargs)
         if not obj and 'policy_holder' in request.GET:
             try:
@@ -209,131 +364,6 @@ class PremiumPaymentAdmin(admin.ModelAdmin):
             except PolicyHolder.DoesNotExist:
                 pass
         return form
-
-    @admin.action(description="Record payment for selected items")
-    def add_payment(self, request, queryset):
-        update_count = 0
-        error_count = 0
-        for payment in queryset:
-            try:
-                # Calculate any applicable fine
-                fine = payment.calculate_fine()
-                
-                # Add the current interval payment plus any fine
-                payment_amount = payment.interval_payment
-                if fine > Decimal('0.00'):
-                    payment_amount += fine  # Include fine in payment
-                    self.message_user(
-                        request,
-                        f"Fine of {fine} included for {payment.policy_holder}.",
-                        level=messages.INFO
-                    )
-                
-                # Check for policy expiry first
-                if payment.check_policy_expiry():
-                    self.message_user(
-                        request, 
-                        f"Policy for {payment.policy_holder} has expired due to non-payment for over 3 years.", 
-                        level=messages.WARNING
-                    )
-                    error_count += 1
-                    continue
-                    
-                # Validate if the period is already paid
-                if payment.is_current_period_paid():
-                    self.message_user(
-                        request, 
-                        f"Payment for {payment.policy_holder} was skipped: current period already paid.", 
-                        level=messages.WARNING
-                    )
-                    error_count += 1
-                    continue
-                
-                # Use the model's add_payment method
-                if payment.add_payment(payment_amount):
-                    update_count += 1
-                    
-                    # Update the next payment date
-                    if payment.policy_holder.payment_interval != "Single":
-                        interval_months = {
-                            "quarterly": 3,
-                            "semi_annual": 6,
-                            "annual": 12
-                        }.get(payment.policy_holder.payment_interval)
-                        
-                        if payment.next_payment_date:
-                            payment.next_payment_date = payment.next_payment_date.replace(
-                                month=((payment.next_payment_date.month - 1 + interval_months) % 12) + 1,
-                                year=payment.next_payment_date.year + ((payment.next_payment_date.month - 1 + interval_months) // 12)
-                            )
-                        else:
-                            today = date.today()
-                            payment.next_payment_date = today.replace(
-                                month=((today.month - 1 + interval_months) % 12) + 1,
-                                year=today.year + ((today.month - 1 + interval_months) // 12)
-                            )
-                        
-                        payment.save()
-                        
-                    # Display total amount paid including any fine
-                    self.message_user(
-                        request,
-                        f"Payment of {payment_amount} recorded for {payment.policy_holder}.",
-                        level=messages.SUCCESS
-                    )
-            except ValidationError as e:
-                self.message_user(
-                    request, 
-                    f"Error recording payment for {payment.policy_holder}: {str(e)}", 
-                    level=messages.ERROR
-                )
-                error_count += 1
-            except Exception as e:
-                self.message_user(
-                    request, 
-                    f"Unexpected error for {payment.policy_holder}: {str(e)}", 
-                    level=messages.ERROR
-                )
-                error_count += 1
-                
-        message = []
-        if update_count > 0:
-            message.append(f"Successfully recorded payments for {update_count} items.")
-        if error_count > 0:
-            message.append(f"Failed to record payments for {error_count} items.")
-            
-        if message:
-            self.message_user(
-                request,
-                " ".join(message),
-                messages.SUCCESS if error_count == 0 else messages.WARNING,
-            )
-
-    @admin.action(description="Check selected policies for expiry")
-    def check_policy_expiry(self, request, queryset):
-        """Admin action to check if policies have expired due to non-payment"""
-        checked_count = 0
-        expired_count = 0
-        
-        for payment in queryset:
-            checked_count += 1
-            if payment.check_policy_expiry():
-                # Save to persist the 'Expired' status set in check_policy_expiry
-                payment.save(update_fields=['payment_status'])
-                expired_count += 1
-                
-        if expired_count > 0:
-            self.message_user(
-                request,
-                f"Checked {checked_count} policies. {expired_count} policies marked as expired due to non-payment.",
-                messages.WARNING
-            )
-        else:
-            self.message_user(
-                request,
-                f"Checked {checked_count} policies. No expired policies found.",
-                messages.SUCCESS
-            )
 
 # Register Employee Position
 @admin.register(EmployeePosition)
@@ -1226,5 +1256,5 @@ class PolicyHolderAdmin(BranchFilterMixin, admin.ModelAdmin):
             return qs
         branch = getattr(request.user.profile, 'branch', None)
         return qs.filter(branch=branch) if branch else qs.none()
-
+    
     
