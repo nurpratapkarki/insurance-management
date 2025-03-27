@@ -19,6 +19,7 @@ A comprehensive insurance management system tailored for the Nepal insurance mar
   - [Reporting System](#reporting-system)
   - [Surrender Process](#surrender-process)
 - [Admin Guide](#admin-guide)
+- [Access Guide](#access-guide)
 - [Nepal Regulatory Compliance](#nepal-regulatory-compliance)
 - [Security Features](#security-features)
 - [Contributing](#contributing)
@@ -228,6 +229,15 @@ The surrender process module handles policy surrenders in various scenarios:
 - **Loan Adjustment**: Deduct outstanding loans from surrender values
 - **Documentation**: Generate surrender certificates and payment notifications
 - **Workflow**: Multi-step approval process for surrender requests
+- **System Protection**: Automatic freeze of surrendered policies to prevent premium payments, loans, or renewals
+- **Certificate Printing**: Generate and print surrender certificates
+
+#### Recent Updates to Surrender Process
+- Enhanced surrender certificate printing with automatic print dialog
+- Added protection against operations on surrendered policies
+- Improved validation for surrender status changes
+- Added support for processing surrenders that are already in "Processed" status
+- Implemented signal-based system to ensure consistent surrender status across the system
 
 ## Admin Guide
 
@@ -249,122 +259,104 @@ The system is primarily administered through a customized Django admin interface
 
 ### Common Admin Tasks
 
-- **User Creation**: Set up new staff members with appropriate permissions
-- **Policy Configuration**: Define policy parameters and rates
-- **Approval Workflows**: Process underwriting, claims, and surrender approvals
-- **Report Generation**: Create periodic branch and agent reports
-- **Backup Management**: Schedule and maintain data backups
+- **User Creation**: Set up new staff accounts with appropriate roles
+- **Policy Configuration**: Create and manage policy products
+- **Approval Workflows**: Handle policy, claim, and loan approvals
+- **Financial Review**: Monitor premium collections and claims payouts
+- **Reporting**: Generate period-end reports for business analysis
+- **Compliance**: Ensure adherence to Nepal insurance regulations
+
+## Access Guide
+
+### How to Access System Screens
+
+All main modules are accessible through the Django admin interface at `/admin/`. Here's how to navigate to each section:
+
+#### Policy Management
+- **Access Path**: Admin > App > Policy Holders
+- **URL**: `/admin/app/policyholder/`
+- **Features**: Create, view, edit policies; policy approval; document management
+
+#### Premium Management
+- **Access Path**: Admin > App > Premium Payments
+- **URL**: `/admin/app/premiumpayment/`
+- **Features**: Record payments; view payment history; generate receipts
+
+#### Claims Management
+- **Access Path**: Admin > App > Claim Requests
+- **URL**: `/admin/app/claimrequest/`
+- **Features**: Create new claims; view/process existing claims; upload claim documents
+
+#### Loan Management
+- **Access Path**: Admin > App > Loans
+- **URL**: `/admin/app/loan/`
+- **Features**: Create new loans; manage repayments; view loan history
+
+#### Surrender Management
+- **Access Path**: Admin > App > Policy Surrenders
+- **URL**: `/admin/app/policysurrender/`
+- **Features**: 
+  - Create/view surrenders at `/admin/app/policysurrender/`
+  - Process a specific surrender at `/admin/app/policysurrender/<id>/change/`
+  - Print surrender certificate at `/admin/print-surrender-certificate/<id>/`
+  - Access surrender process via buttons in the changelist view
+  - Surrender approval and payment processing through status changes
+
+#### Agent Management
+- **Access Path**: Admin > App > Sales Agents
+- **URL**: `/admin/app/salesagent/`
+- **Features**: Manage agents; track performance; calculate commissions
+
+#### Policy Renewal
+- **Access Path**: Admin > App > Policy Renewals
+- **URL**: `/admin/app/policyrenewal/`
+- **Features**: View pending renewals; process renewals; send reminders
+
+#### User Management
+- **Access Path**: Admin > Authentication and Authorization > Users
+- **URL**: `/admin/auth/user/`
+- **Features**: Manage system users and their permissions
+
+#### Reports
+- **Access Path**: Admin > App > Reports (or specific report types)
+- **URL**: Various report-specific URLs
+- **Features**: Generate and export reports for different aspects of the business
+
+### Special Feature Access
+
+- **Print Surrender Certificate**: Available as a button on surrender detail page or list view (for Approved/Processed surrenders)
+- **Policy Renewal**: Access renewal buttons from the Policy Renewal list page
+- **Claim Payment Processing**: Buttons available in Claims Processing view
+- **Agent Commission**: Accessible from agent detail page or commission list
 
 ## Nepal Regulatory Compliance
 
-The system includes features specifically designed for Nepal's insurance regulations:
+The system is designed to comply with Nepal's insurance regulations:
 
-- **Beema Samiti Compliance**: Registration number tracking and reporting
-- **KYC/AML Integration**: Know Your Customer and Anti-Money Laundering features
-- **Tax Compliance**: Automated VAT, service tax, and TDS calculations
-- **Statutory Reporting**: Generate reports required by Nepalese regulations
-- **Document Requirements**: Nepal-specific document collection and verification
-- **Policy Terms**: Standardized policy wording aligned with Nepal regulations
-- **Financial Limits**: Adherence to regulatory limits for various operations
+- **Beema Samiti Guidelines**: Adheres to rules set by Nepal's Insurance Board
+- **Documentation**: Generates all required regulatory documents
+- **Reporting**: Supports required regulatory reports
+- **Tax Handling**: Calculates and tracks Nepal-specific taxes:
+  - VAT (13%)
+  - Insurance Service Tax
+  - TDS on surrender and maturity
+- **Policy Terms**: Configurable to match Nepal insurance product requirements
 
 ## Security Features
 
-- **Role-Based Access Control**: Granular permissions for different user types
-- **OTP Authentication**: Two-factor authentication for sensitive operations
-- **Audit Trails**: Track all significant actions within the system
-- **Data Encryption**: Secure storage of sensitive information
-- **Session Management**: Secure session handling and timeout controls
-- **Password Policies**: Enforce strong password requirements
-- **Backup and Recovery**: Regular automated backups with secure storage
+The system implements several security features:
+
+- **Role-Based Access**: Users can only access permitted modules
+- **Audit Logging**: Tracks all sensitive operations
+- **OTP Authentication**: Required for high-risk actions
+- **Data Encryption**: Sensitive data is encrypted at rest
+- **Session Management**: Security settings for session timeouts
+- **Backup Systems**: Regular automated database backups
 
 ## Contributing
 
-Contributions to the Insurance Management System are welcome. Please follow these steps:
+Please refer to CONTRIBUTING.md for guidelines on how to contribute to this project.
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature-name`
-3. Commit your changes: `git commit -am 'Add new feature'`
-4. Push to the branch: `git push origin feature-name`
-5. Submit a Pull Request
-
-# Insurance Management System - New Features
-
-## Policy Renewal Process
-
-The policy renewal process has been completely revamped with the following features:
-
-1. **Automated Renewal Detection**: The system automatically identifies policies approaching maturity and creates renewal records.
-2. **Structured Renewal Workflow**: A clear process for initiating, tracking, and completing policy renewals.
-3. **Tiered Reminder System**: Three-level reminder system (first, second, final) to notify policyholders about upcoming renewals.
-4. **Grace Period Management**: Automatic tracking of grace periods with expiration handling.
-5. **User-friendly Interface**: Clear dashboard for managing renewals with action buttons for each step.
-
-## Agent Commission Dashboard
-
-A comprehensive dashboard for sales agents to track their performance:
-
-1. **Visual Commission Tracking**: Interactive charts showing commission trends over time.
-2. **Performance Metrics**: Key performance indicators including:
-   - Policy sales metrics
-   - Premium collection stats
-   - Target achievement visualization
-   - Customer retention rates
-   - Renewal success rates
-   - Average policy value
-
-3. **Commission History**: Detailed records of all commissions with status tracking.
-4. **Goal Setting & Tracking**: Visual representation of progress toward sales targets.
-
-## Multi-language Support
-
-The system now includes robust internationalization support:
-
-1. **Full i18n Implementation**: All user-facing text is now translation-ready using Django's i18n framework.
-2. **English and Nepali Languages**: Complete bilingual support focusing on Nepal's official languages.
-3. **Language Switcher**: Easy-to-use language toggle on all key interfaces.
-4. **Localized Formatting**: Proper formatting for dates, currencies, and numbers in both languages.
-
-## Implementation Notes
-
-### Technical Improvements
-
-1. **Template Standardization**: All templates now follow the same structure and style guidelines.
-2. **Responsive Design**: All new interfaces are fully responsive and work on mobile devices.
-3. **Clean URL Structure**: Logical and RESTful URL patterns for new functionality.
-4. **Performance Optimization**: Efficient database queries for dashboard metrics.
-
-### Setup Requirements
-
-To enable the new features:
-
-1. Run migrations to add new model fields:
-   ```
-   python manage.py makemigrations
-   python manage.py migrate
-   ```
-
-2. Compile translation files:
-   ```
-   django-admin compilemessages
-   ```
-
-3. Configure automated tasks for renewal reminders (requires setting up a task scheduler):
-   ```python
-   # Example cron job (add to your scheduler)
-   from app.models import PolicyRenewal
-   
-   def check_renewals():
-       renewals_due = PolicyRenewal.objects.filter(status='Pending', is_first_reminder_sent=False)
-       for renewal in renewals_due:
-           renewal.send_reminder('first')
-   ```
-
-### Future Enhancements
-
-1. **SMS Integration**: Add SMS notifications for renewal reminders.
-2. **Email Template Customization**: Allow admin customization of email templates.
-3. **Additional Performance Metrics**: Expand the agent dashboard with more KPIs.
-4. **Expanded Language Support**: Framework in place to easily add more languages. 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+This project is licensed under the [LICENSE NAME] - see the LICENSE file for details. 
