@@ -440,15 +440,16 @@ def process_loan_repayment(sender, instance, created, **kwargs):
             # Skip if this is from a signal to prevent recursion
             if getattr(loan, '_from_signal', False):
                 return
-                
-            loan._from_signal = True
-            instance.process_repayment()
-            loan._from_signal = False
+            
+            # Skip process_repayment() since it's already called in the save method
+            # Simply update the loan status if needed
             
             # Check if loan is fully paid
-            if loan.remaining_balance <= 0:
+            if loan.remaining_balance <= 0 and loan.accrued_interest <= 0:
+                loan._from_signal = True
                 loan.loan_status = 'Paid'
                 loan.save(update_fields=['loan_status'])
+                loan._from_signal = False
                 logger.info(f"Loan {loan.id} marked as fully paid")
     except Exception as e:
         logger.error(f"Error processing loan repayment {instance.id}: {str(e)}")

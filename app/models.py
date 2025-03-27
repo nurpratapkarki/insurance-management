@@ -1806,9 +1806,16 @@ class LoanRepayment(models.Model):
         default='Both'
     )
     remaining_loan_balance = models.DecimalField(max_digits=12, decimal_places=2, editable=False, help_text="Remaining loan balance after this repayment.")
+    
+    class Meta:
+        ordering = ['-repayment_date']
 
     def process_repayment(self):
         """Apply repayment to interest and/or principal."""
+        # If this record already has a remaining_loan_balance, it's already been processed
+        if self.pk and self.remaining_loan_balance > 0:
+            return
+            
         remaining = self.amount
 
         if self.repayment_type in ('Both', 'Interest'):
@@ -1834,7 +1841,9 @@ class LoanRepayment(models.Model):
 
     def save(self, *args, **kwargs):
         """Process repayment before saving."""
-        self.process_repayment()
+        # Always create new records, never update existing ones
+        if not self.pk or not self.remaining_loan_balance:
+            self.process_repayment()
         super().save(*args, **kwargs)
 
     def __str__(self):

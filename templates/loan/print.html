@@ -1,0 +1,295 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+{% load static %}
+
+{% block extrastyle %}
+<style type="text/css">
+    @media print {
+        body * {
+            visibility: hidden;
+        }
+        .print-container, .print-container * {
+            visibility: visible;
+        }
+        .print-container {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+        }
+        .no-print {
+            display: none;
+        }
+    }
+    
+    .print-container {
+        max-width: 210mm;
+        margin: 0 auto;
+        padding: 20px;
+        font-family: Arial, sans-serif;
+        color: #333;
+    }
+    
+    .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        border-bottom: 2px solid #4a6f8a;
+        padding-bottom: 10px;
+    }
+    
+    .logo {
+        max-height: 80px;
+    }
+    
+    .document-title {
+        font-size: 24px;
+        font-weight: bold;
+        color: #4a6f8a;
+        text-align: center;
+        margin: 20px 0;
+    }
+    
+    .loan-reference {
+        text-align: right;
+        font-size: 14px;
+        margin-bottom: 15px;
+    }
+    
+    .section {
+        margin-bottom: 20px;
+        padding: 15px;
+        background-color: #f9f9f9;
+        border-radius: 5px;
+    }
+    
+    .section-title {
+        font-size: 18px;
+        font-weight: bold;
+        color: #4a6f8a;
+        margin-bottom: 10px;
+        border-bottom: 1px solid #ddd;
+        padding-bottom: 5px;
+    }
+    
+    .detail-row {
+        display: flex;
+        margin-bottom: 8px;
+    }
+    
+    .detail-label {
+        font-weight: bold;
+        width: 200px;
+        color: #555;
+    }
+    
+    .detail-value {
+        flex: 1;
+    }
+    
+    .status-badge {
+        padding: 5px 10px;
+        border-radius: 15px;
+        font-size: 12px;
+        font-weight: bold;
+        display: inline-block;
+        margin-left: 10px;
+    }
+    
+    .status-approved {
+        background-color: #d4edda;
+        color: #155724;
+    }
+    
+    .status-pending {
+        background-color: #fff3cd;
+        color: #856404;
+    }
+    
+    .status-rejected {
+        background-color: #f8d7da;
+        color: #721c24;
+    }
+    
+    .footer {
+        margin-top: 30px;
+        padding-top: 20px;
+        border-top: 1px solid #ddd;
+        font-size: 12px;
+        color: #777;
+    }
+    
+    .signature-section {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 50px;
+    }
+    
+    .signature-box {
+        width: 45%;
+    }
+    
+    .signature-line {
+        border-top: 1px solid #000;
+        margin-top: 50px;
+        margin-bottom: 10px;
+    }
+    
+    .print-button {
+        background-color: #4a6f8a;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 14px;
+        margin-bottom: 20px;
+    }
+    
+    .print-button:hover {
+        background-color: #3a5a71;
+    }
+    
+    @page {
+        size: A4;
+        margin: 10mm;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<button onclick="window.print();" class="print-button no-print">{% trans "Print Loan Document" %}</button>
+
+<div class="print-container">
+    <div class="header">
+        <img src="{% if company_logo %}{{ company_logo }}{% else %}{% static 'admin/img/logo.png' %}{% endif %}" alt="Company Logo" class="logo">
+        <h2>{{ company_name|default:"Insurance Company" }}</h2>
+    </div>
+    
+    <h1 class="document-title">LOAN AGREEMENT</h1>
+    
+    <div class="loan-reference">
+        <span class="detail-label">Loan Reference:</span>
+        <strong>#{{ loan.id }}</strong>
+        <span class="status-badge {% if loan.loan_status == 'Active' %}status-approved{% elif loan.loan_status == 'Paid' %}status-rejected{% else %}status-pending{% endif %}">
+            {{ loan.loan_status }}
+        </span>
+    </div>
+
+    <div class="section">
+        <h3 class="section-title">Policyholder Information</h3>
+        <div class="detail-row">
+            <span class="detail-label">Name:</span>
+            <span class="detail-value">{{ loan.policy_holder.first_name }} {{ loan.policy_holder.last_name }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Policy Number:</span>
+            <span class="detail-value">{{ loan.policy_holder.policy_number }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Contact:</span>
+            <span class="detail-value">{{ loan.policy_holder.mobile_number }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Address:</span>
+            <span class="detail-value">{{ loan.policy_holder.address }}</span>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3 class="section-title">Loan Details</h3>
+        <div class="detail-row">
+            <span class="detail-label">Loan Amount:</span>
+            <span class="detail-value">Rs. {{ loan.loan_amount }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Interest Rate:</span>
+            <span class="detail-value">{{ loan.interest_rate }}%</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Remaining Balance:</span>
+            <span class="detail-value">Rs. {{ loan.remaining_balance }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Accrued Interest:</span>
+            <span class="detail-value">Rs. {{ loan.accrued_interest }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Last Interest Date:</span>
+            <span class="detail-value">{{ loan.last_interest_date }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Created Date:</span>
+            <span class="detail-value">{{ loan.created_at }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Status:</span>
+            <span class="detail-value">{{ loan.loan_status }}</span>
+        </div>
+    </div>
+
+    {% if loan.repayments.all %}
+    <div class="section">
+        <h3 class="section-title">Loan Repayments</h3>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+            <thead>
+                <tr style="background-color: #f2f2f2;">
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Date</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Amount</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Type</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Remaining Balance</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for repayment in loan.repayments.all %}
+                <tr>
+                    <td style="padding: 8px; text-align: left; border: 1px solid #ddd;">{{ repayment.repayment_date }}</td>
+                    <td style="padding: 8px; text-align: left; border: 1px solid #ddd;">Rs. {{ repayment.amount }}</td>
+                    <td style="padding: 8px; text-align: left; border: 1px solid #ddd;">{{ repayment.repayment_type }}</td>
+                    <td style="padding: 8px; text-align: left; border: 1px solid #ddd;">Rs. {{ repayment.remaining_loan_balance }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <div class="section">
+        <h3 class="section-title">Terms and Conditions</h3>
+        <p>
+            1. The borrower agrees to repay the loan amount plus interest according to the payment schedule.
+        </p>
+        <p>
+            2. Failure to make payments on time may result in penalties and affect future loan eligibility.
+        </p>
+        <p>
+            3. Early repayment is permitted without additional penalties.
+        </p>
+        <p>
+            4. The insurance company reserves the right to adjust the terms of the loan as per policy guidelines.
+        </p>
+    </div>
+
+    <div class="signature-section">
+        <div class="signature-box">
+            <div class="signature-line"></div>
+            <p>Borrower Signature</p>
+            <p>{{ loan.policy_holder.first_name }} {{ loan.policy_holder.last_name }}</p>
+            <p>Date: _______________</p>
+        </div>
+        <div class="signature-box">
+            <div class="signature-line"></div>
+            <p>Company Representative</p>
+            <p>_______________________</p>
+            <p>Date: _______________</p>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>&copy; {{ current_year }} {{ company_name|default:"Insurance Company" }}. All rights reserved.</p>
+        <p>This document was generated on {{ current_date }}.</p>
+        <p>Document ID: {{ loan.id }}-{{ current_date|date:"Ymd" }}</p>
+    </div>
+</div>
+{% endblock %} 

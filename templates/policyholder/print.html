@@ -13,14 +13,17 @@
         max-width: 800px;
         margin: 0 auto;
         padding: 20px;
-        font-family: Arial, sans-serif;
+        font-family: 'Segoe UI', Arial, sans-serif;
+        color: #333;
+        background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" opacity="0.03"><text x="0" y="40" font-family="Arial" font-size="20" font-weight="bold" fill="%23000">{{ company_name }}</text></svg>') center center;
     }
 
     .print-header {
         text-align: center;
         margin-bottom: 30px;
         padding-bottom: 20px;
-        border-bottom: 2px solid #333;
+        border-bottom: 2px solid #3a5c96;
+        color: #3a5c96;
     }
 
     .company-logo {
@@ -28,28 +31,53 @@
         margin-bottom: 15px;
     }
 
+    .policy-title {
+        text-transform: uppercase;
+        font-size: 1.3em;
+        margin: 10px 0;
+        letter-spacing: 2px;
+        color: #555;
+    }
+
     .policy-number {
         font-size: 1.2em;
         color: #666;
         margin-top: 10px;
+        border: 1px solid #ddd;
+        display: inline-block;
+        padding: 5px 15px;
+        border-radius: 4px;
+        background-color: #f9f9f9;
+    }
+
+    .highlighted {
+        font-weight: bold;
+        color: #3a5c96;
     }
 
     .section {
         margin-bottom: 30px;
+        page-break-inside: avoid;
     }
 
     .section-title {
-        background: #f5f5f5;
-        padding: 10px;
+        background: linear-gradient(to right, #3a5c96, #5a7cb6);
+        color: white;
+        padding: 10px 15px;
         margin-bottom: 15px;
         font-weight: bold;
-        border-left: 4px solid #333;
+        border-radius: 4px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
 
     .info-grid {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
         gap: 15px;
+        background-color: #f9f9f9;
+        padding: 15px;
+        border-radius: 4px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
 
     .info-item {
@@ -60,7 +88,7 @@
     .info-label {
         font-weight: bold;
         min-width: 150px;
-        color: #555;
+        color: #3a5c96;
     }
 
     .info-value {
@@ -76,22 +104,36 @@
         width: 100%;
         border-collapse: collapse;
         margin-bottom: 20px;
+        background-color: white;
     }
 
     th, td {
         border: 1px solid #ddd;
-        padding: 8px;
+        padding: 10px;
         text-align: left;
     }
 
     th {
-        background-color: #f5f5f5;
+        background-color: #f2f6fc;
+        color: #3a5c96;
     }
 
     .footer {
         margin-top: 50px;
         padding-top: 20px;
         border-top: 1px solid #ddd;
+        text-align: center;
+        font-size: 0.9em;
+        color: #666;
+    }
+
+    .company-stamp {
+        font-size: 1.2em;
+        font-weight: bold;
+        color: #3a5c96;
+        margin-bottom: 15px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
     }
 
     .signature-section {
@@ -111,6 +153,77 @@
         margin-bottom: 10px;
     }
 
+    .terms-content {
+        font-size: 0.9em;
+        color: #333;
+        margin-bottom: 20px;
+        text-align: justify;
+        background-color: #f9f9f9;
+        padding: 15px;
+        border-radius: 4px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .terms-intro {
+        font-style: italic;
+        margin-bottom: 15px;
+        color: #3a5c96;
+    }
+
+    .terms-content ol {
+        padding-left: 20px;
+    }
+
+    .terms-content li {
+        margin-bottom: 10px;
+        text-align: justify;
+    }
+
+    .disclaimer {
+        font-size: 0.8em;
+        font-style: italic;
+        border-top: 1px dashed #ddd;
+        padding-top: 10px;
+        margin-top: 15px;
+        color: #777;
+    }
+
+    .print-date {
+        margin-top: 15px;
+        font-size: 0.8em;
+        color: #888;
+    }
+
+    .serial-number {
+        margin-top: 5px;
+        font-size: 0.7em;
+        color: #999;
+        letter-spacing: 1px;
+    }
+
+    .btn {
+        padding: 8px 16px;
+        font-size: 14px;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-right: 10px;
+        border: none;
+    }
+
+    .btn-primary {
+        background-color: #3a5c96;
+        color: white;
+    }
+
+    .btn-secondary {
+        background-color: #6c757d;
+        color: white;
+    }
+
+    .mb-3 {
+        margin-bottom: 15px;
+    }
+
     @media print {
         .no-print {
             display: none;
@@ -127,14 +240,19 @@
 {% block content %}
 <div class="print-container">
     <div class="no-print">
-        <button onclick="window.print()">Print Policy</button>
-        <button onclick="window.close()">Close</button>
+        <button onclick="window.print()" class="btn btn-primary mb-3"><strong>Print Policy</strong></button>
+        <button onclick="window.close()" class="btn btn-secondary mb-3">Close</button>
     </div>
 
     <div class="print-header">
-        <img src="{{ STATIC_URL }}img/company-logo.png" alt="Company Logo" class="company-logo">
+        {% if original.branch.company.logo %}
+            <img src="{{ original.branch.company.logo.url }}" alt="{{ company_name }} Logo" class="company-logo">
+        {% else %}
+            <img src="{{ STATIC_URL }}img/company-logo.png" alt="Company Logo" class="company-logo">
+        {% endif %}
         <h1>{{ company_name }}</h1>
-        <div class="policy-number">Policy Number: {{ original.policy_number }}</div>
+        <h2 class="policy-title">INSURANCE POLICY DOCUMENT</h2>
+        <div class="policy-number">Policy Number: <span class="highlighted">{{ original.policy_number }}</span></div>
     </div>
 
     <div class="section">
@@ -142,7 +260,7 @@
         <div class="info-grid">
             <div class="info-item">
                 <span class="info-label">Full Name:</span>
-                <span class="info-value">{{ original.first_name }} {{ original.middle_name }} {{ original.last_name }}</span>
+                <span class="info-value">{{ original.first_name }}{% if original.middle_name %} {{ original.middle_name }}{% endif %} {{ original.last_name }}</span>
             </div>
             <div class="info-item">
                 <span class="info-label">Date of Birth:</span>
@@ -217,7 +335,30 @@
     </div>
     {% endif %}
 
+    <div class="section">
+        <h2 class="section-title">Terms and Conditions</h2>
+        <div class="terms-content">
+            <p class="terms-intro">This insurance policy is subject to the following terms and conditions. Please read them carefully.</p>
+            <ol>
+                <li><strong>Premium Payment:</strong> Policy premiums must be paid according to the agreed payment schedule ({{ original.payment_interval }}). A grace period of 15 days is allowed for premium payments after which penalties may apply at the rate of 1% per month on the outstanding amount.</li>
+                <li><strong>Policy Revival:</strong> If the policy lapses due to non-payment, it may be revived within a period of 2 years from the date of first unpaid premium, subject to payment of all arrears with interest and providing evidence of continued insurability to the satisfaction of the company.</li>
+                <li><strong>Surrender Value:</strong> The policy acquires a surrender value after completion of 3 full years of premium payment. The surrender value will be calculated as per the company's prevailing terms and according to the policy type ({{ original.policy.policy_type }}).</li>
+                <li><strong>Death Benefit:</strong> In the event of the policyholder's death during the policy term, the sum assured ({{ original.sum_assured }}) plus any accumulated bonuses will be paid to the nominee ({{ original.nominee_name|default:"as specified" }}).</li>
+                <li><strong>Maturity Benefit:</strong> On survival to the end of the policy term ({{ original.duration_years }} years), the sum assured plus vested bonuses will be paid to the policyholder.</li>
+                <li><strong>Loan Facility:</strong> Policy loans may be granted after the policy has acquired surrender value, subject to terms and conditions. The maximum loan amount shall not exceed 90% of the surrender value.</li>
+                <li><strong>Free Look Period:</strong> The policyholder has the right to review the policy terms within 15 days from the date of receipt of the policy document. If dissatisfied, the policy can be returned for cancellation, subject to deduction of expenses incurred by the company.</li>
+                <li><strong>Exclusions:</strong> No benefits will be payable in case of suicide within 12 months from the date of commencement or revival of the policy. Other standard exclusions apply as per company policy.</li>
+                <li><strong>Nomination:</strong> The policyholder can nominate a person to receive the policy benefits in case of the policyholder's death. The nomination can be changed at any time during the policy term.</li>
+                <li><strong>Assignment:</strong> The policy can be assigned as security for a loan or transferred to another person. The company must be notified of any assignment in writing.</li>
+                <li><strong>Alterations:</strong> The policyholder may request changes to the policy, such as change of address, nomination, or assignment, by giving written notice to the company.</li>
+                <li><strong>Jurisdiction:</strong> All disputes are subject to the jurisdiction of courts in the location of the issuing office ({{ original.branch.location|default:"Head Office" }}).</li>
+            </ol>
+            <p class="disclaimer"><strong>Disclaimer:</strong> This document is computer-generated and serves as a reference only. The official policy contract and its terms prevail in case of any discrepancy. The company reserves the right to modify terms and conditions as per regulatory requirements.</p>
+        </div>
+    </div>
+
     <div class="footer">
+        <div class="company-stamp">{{ company_name }} - Trusted Insurance Provider</div>
         <p>This document is computer generated and does not require a signature.</p>
         <div class="signature-section">
             <div class="signature-box">
@@ -229,7 +370,8 @@
                 <p>Authorized Signatory</p>
             </div>
         </div>
-        <p class="print-date">Printed on: {% now "F j, Y H:i" %}</p>
+        <p class="print-date">Issued on: {% now "F j, Y" %}</p>
+        <div class="serial-number">Serial: {{ original.id }}-{% now "Ymd" %}</div>
     </div>
 </div>
 {% endblock %}

@@ -1,0 +1,392 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+    @page {
+        size: A4;
+        margin: 2cm;
+    }
+
+    .print-container {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        font-family: 'Segoe UI', Arial, sans-serif;
+        color: #333;
+        background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" opacity="0.03"><text x="0" y="40" font-family="Arial" font-size="20" font-weight="bold" fill="%23000">{{ company_name }}</text></svg>') center center;
+    }
+
+    .print-header {
+        text-align: center;
+        margin-bottom: 30px;
+        padding-bottom: 20px;
+        border-bottom: 2px solid #3a5c96;
+        color: #3a5c96;
+    }
+
+    .company-logo {
+        max-width: 200px;
+        margin-bottom: 15px;
+    }
+
+    .application-title {
+        text-transform: uppercase;
+        font-size: 1.3em;
+        margin: 10px 0;
+        letter-spacing: 2px;
+        color: #555;
+    }
+
+    .application-number {
+        font-size: 1.2em;
+        color: #666;
+        margin-top: 10px;
+        border: 1px solid #ddd;
+        display: inline-block;
+        padding: 5px 15px;
+        border-radius: 4px;
+        background-color: #f9f9f9;
+    }
+
+    .highlighted {
+        font-weight: bold;
+        color: #3a5c96;
+    }
+
+    .section {
+        margin-bottom: 30px;
+        page-break-inside: avoid;
+    }
+
+    .section-title {
+        background: linear-gradient(to right, #3a5c96, #5a7cb6);
+        color: white;
+        padding: 10px 15px;
+        margin-bottom: 15px;
+        font-weight: bold;
+        border-radius: 4px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .info-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 15px;
+        background-color: #f9f9f9;
+        padding: 15px;
+        border-radius: 4px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .info-item {
+        display: flex;
+        margin-bottom: 8px;
+    }
+
+    .info-label {
+        font-weight: bold;
+        min-width: 150px;
+        color: #3a5c96;
+    }
+
+    .info-value {
+        flex: 1;
+    }
+
+    .document-container {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 15px;
+        margin-top: 15px;
+    }
+
+    .document {
+        border: 1px solid #ddd;
+        padding: 10px;
+        text-align: center;
+        border-radius: 4px;
+        background-color: white;
+    }
+
+    .document img {
+        max-width: 100%;
+        max-height: 200px;
+        margin-bottom: 10px;
+    }
+
+    .document-title {
+        font-weight: bold;
+        font-size: 0.9em;
+        color: #555;
+    }
+
+    .footer {
+        margin-top: 50px;
+        padding-top: 20px;
+        border-top: 1px solid #ddd;
+        text-align: center;
+        font-size: 0.9em;
+        color: #666;
+    }
+
+    .company-stamp {
+        font-size: 1.2em;
+        font-weight: bold;
+        color: #3a5c96;
+        margin-bottom: 15px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    .signature-section {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 50px;
+    }
+
+    .signature-box {
+        width: 200px;
+        text-align: center;
+    }
+
+    .signature-line {
+        border-top: 1px solid #000;
+        margin-top: 50px;
+        margin-bottom: 10px;
+    }
+
+    .print-date {
+        margin-top: 15px;
+        font-size: 0.8em;
+        color: #888;
+    }
+
+    .serial-number {
+        margin-top: 5px;
+        font-size: 0.7em;
+        color: #999;
+        letter-spacing: 1px;
+    }
+
+    .btn {
+        padding: 8px 16px;
+        font-size: 14px;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-right: 10px;
+        border: none;
+    }
+
+    .btn-primary {
+        background-color: #3a5c96;
+        color: white;
+    }
+
+    .btn-secondary {
+        background-color: #6c757d;
+        color: white;
+    }
+
+    .mb-3 {
+        margin-bottom: 15px;
+    }
+
+    @media print {
+        .no-print {
+            display: none;
+        }
+        
+        body {
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="print-container">
+    <div class="no-print">
+        <button onclick="window.print()" class="btn btn-primary mb-3"><strong>Print Application</strong></button>
+        <button onclick="window.close()" class="btn btn-secondary mb-3">Close</button>
+    </div>
+
+    <div class="print-header">
+        {% if original.branch.company.logo %}
+            <img src="{{ original.branch.company.logo.url }}" alt="{{ company_name }} Logo" class="company-logo">
+        {% else %}
+            <img src="{{ STATIC_URL }}img/company-logo.png" alt="Company Logo" class="company-logo">
+        {% endif %}
+        <h1>{{ company_name }}</h1>
+        <h2 class="application-title">AGENT APPLICATION FORM</h2>
+        <div class="application-number">Application ID: <span class="highlighted">{{ original.id }}</span></div>
+    </div>
+
+    <div class="section">
+        <h2 class="section-title">Personal Information</h2>
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="info-label">Full Name:</span>
+                <span class="info-value">{{ original.first_name }} {{ original.last_name }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Date of Birth:</span>
+                <span class="info-value">{{ original.date_of_birth }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Gender:</span>
+                <span class="info-value">{{ original.gender }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Contact Number:</span>
+                <span class="info-value">{{ original.phone_number }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Email:</span>
+                <span class="info-value">{{ original.email }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Address:</span>
+                <span class="info-value">{{ original.address }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2 class="section-title">Family Information</h2>
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="info-label">Father's Name:</span>
+                <span class="info-value">{{ original.father_name }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Mother's Name:</span>
+                <span class="info-value">{{ original.mother_name }}</span>
+            </div>
+            {% if original.grand_father_name %}
+            <div class="info-item">
+                <span class="info-label">Grandfather's Name:</span>
+                <span class="info-value">{{ original.grand_father_name }}</span>
+            </div>
+            {% endif %}
+            {% if original.grand_mother_name %}
+            <div class="info-item">
+                <span class="info-label">Grandmother's Name:</span>
+                <span class="info-value">{{ original.grand_mother_name }}</span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="section">
+        <h2 class="section-title">License Information</h2>
+        <div class="info-grid">
+            {% if original.license_number %}
+            <div class="info-item">
+                <span class="info-label">License Number:</span>
+                <span class="info-value">{{ original.license_number }}</span>
+            </div>
+            {% endif %}
+            {% if original.license_type %}
+            <div class="info-item">
+                <span class="info-label">License Type:</span>
+                <span class="info-value">{{ original.license_type }}</span>
+            </div>
+            {% endif %}
+            {% if original.license_issue_date %}
+            <div class="info-item">
+                <span class="info-label">Issue Date:</span>
+                <span class="info-value">{{ original.license_issue_date }}</span>
+            </div>
+            {% endif %}
+            {% if original.license_expiry_date %}
+            <div class="info-item">
+                <span class="info-label">Expiry Date:</span>
+                <span class="info-value">{{ original.license_expiry_date }}</span>
+            </div>
+            {% endif %}
+            {% if original.license_issue_district %}
+            <div class="info-item">
+                <span class="info-label">Issuing District:</span>
+                <span class="info-value">{{ original.license_issue_district }}</span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if original.citizenship_front or original.citizenship_back or original.license_front or original.license_back or original.pp_photo %}
+    <div class="section">
+        <h2 class="section-title">Uploaded Documents</h2>
+        <div class="document-container">
+            {% if original.citizenship_front %}
+            <div class="document">
+                <img src="{{ original.citizenship_front.url }}" alt="Citizenship Front">
+                <div class="document-title">Citizenship Front</div>
+            </div>
+            {% endif %}
+            {% if original.citizenship_back %}
+            <div class="document">
+                <img src="{{ original.citizenship_back.url }}" alt="Citizenship Back">
+                <div class="document-title">Citizenship Back</div>
+            </div>
+            {% endif %}
+            {% if original.license_front %}
+            <div class="document">
+                <img src="{{ original.license_front.url }}" alt="License Front">
+                <div class="document-title">License Front</div>
+            </div>
+            {% endif %}
+            {% if original.license_back %}
+            <div class="document">
+                <img src="{{ original.license_back.url }}" alt="License Back">
+                <div class="document-title">License Back</div>
+            </div>
+            {% endif %}
+            {% if original.pp_photo %}
+            <div class="document">
+                <img src="{{ original.pp_photo.url }}" alt="Passport Photo">
+                <div class="document-title">Passport Photo</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="section">
+        <h2 class="section-title">Application Status</h2>
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="info-label">Status:</span>
+                <span class="info-value">{{ original.status }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Application Date:</span>
+                <span class="info-value">{{ original.created_at }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Branch:</span>
+                <span class="info-value">{{ original.branch.name }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <div class="company-stamp">{{ company_name }} - Trusted Insurance Provider</div>
+        <p>This document is computer generated and contains confidential information.</p>
+        <div class="signature-section">
+            <div class="signature-box">
+                <div class="signature-line"></div>
+                <p>Applicant's Signature</p>
+            </div>
+            <div class="signature-box">
+                <div class="signature-line"></div>
+                <p>Authorized Signatory</p>
+            </div>
+        </div>
+        <p class="print-date">Printed on: {% now "F j, Y" %}</p>
+        <div class="serial-number">Serial: APP-{{ original.id }}-{% now "Ymd" %}</div>
+    </div>
+</div>
+{% endblock %} 

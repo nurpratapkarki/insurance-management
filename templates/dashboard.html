@@ -1,4 +1,3 @@
-
 {% extends 'admin/base_site.html' %}
 {% load static %}
 
@@ -135,6 +134,78 @@
     .status-active { background-color: #dcfce7; color: #166534; }
     .status-pending { background-color: #fef9c3; color: #854d0e; }
     .status-inactive { background-color: #fee2e2; color: #991b1b; }
+
+    .quick-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .action-btn {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.2);
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s ease;
+    }
+
+    .action-btn:hover {
+        background: rgba(255, 255, 255, 0.3);
+        transform: scale(1.1);
+        text-decoration: none;
+        color: white;
+    }
+
+    .quick-actions-card {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 15px;
+        background: var(--card-bg);
+        border-radius: 24px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        backdrop-filter: blur(10px);
+        padding: 20px;
+    }
+
+    .quick-action-item {
+        text-align: center;
+    }
+
+    .quick-action-link {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 15px;
+        background: linear-gradient(135deg, #f0f9ff 0%, #e6f7ff 100%);
+        border-radius: 12px;
+        text-decoration: none;
+        color: #3a5c96;
+        transition: all 0.3s ease;
+        height: 100%;
+        border: 1px solid rgba(0, 0, 0, 0.05);
+    }
+
+    .quick-action-link:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.05);
+        text-decoration: none;
+        color: #3a5c96;
+    }
+
+    .quick-action-link i {
+        font-size: 24px;
+        margin-bottom: 10px;
+    }
+
+    .quick-action-link span {
+        font-weight: 500;
+    }
 </style>
 {% endblock %}
 
@@ -170,17 +241,29 @@
         <!-- Policy Holders Card -->
         <div class="col-md-3">
             <div class="metric-card policy-card p-4 text-white">
-                <div class="metric-icon">
-                    <i class="fas fa-users"></i>
-                </div>
-                <div class="metric-title">Policy Holders</div>
-                <div class="metric-value">{{ company_report.total_policy_holders }}</div>
-                <div class="metric-subtitle">
-                    {% if is_branch_view %}
-                        Active in branch
-                    {% else %}
-                        Total across company
-                    {% endif %}
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <div class="metric-icon">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <div class="metric-title">Policy Holders</div>
+                        <div class="metric-value">{{ company_report.total_policy_holders }}</div>
+                        <div class="metric-subtitle">
+                            {% if is_branch_view %}
+                                Active in branch
+                            {% else %}
+                                Total across company
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="quick-actions">
+                        <a href="{% url 'admin:app_policyholder_add' %}" class="action-btn" title="Add New Policyholder">
+                            <i class="fas fa-plus"></i>
+                        </a>
+                        <a href="{% url 'admin:app_policyholder_changelist' %}" class="action-btn" title="View All Policyholders">
+                            <i class="fas fa-search"></i>
+                        </a>
+                    </div>
                 </div>
             </div>
         </div>
@@ -188,42 +271,111 @@
         <!-- Active Policies Card -->
         <div class="col-md-3">
             <div class="metric-card premium-card p-4 text-white">
-                <div class="metric-icon">
-                    <i class="fas fa-file-contract"></i>
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <div class="metric-icon">
+                            <i class="fas fa-file-contract"></i>
+                        </div>
+                        <div class="metric-title">Active Policies</div>
+                        <div class="metric-value">{{ company_report.active_policy_holders }}</div>
+                        <div class="metric-subtitle">Currently active</div>
+                    </div>
+                    <div class="quick-actions">
+                        <a href="{% url 'admin:app_insurancepolicy_changelist' %}" class="action-btn" title="Manage Policies">
+                            <i class="fas fa-cog"></i>
+                        </a>
+                    </div>
                 </div>
-                <div class="metric-title">Active Policies</div>
-                <div class="metric-value">{{ company_report.active_policy_holders }}</div>
-                <div class="metric-subtitle">Currently active</div>
             </div>
         </div>
 
         <!-- Total Premiums Card -->
         <div class="col-md-3">
             <div class="metric-card agent-card p-4 text-white">
-                <div class="metric-icon">
-                    <i class="fas fa-wallet"></i>
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <div class="metric-icon">
+                            <i class="fas fa-wallet"></i>
+                        </div>
+                        <div class="metric-title">Total Premiums</div>
+                        <div class="metric-value">
+                            <span class="currency-prefix">Rs.</span>
+                            {{ company_report.total_premiums|floatformat:0 }}
+                        </div>
+                        <div class="metric-subtitle">Revenue collected</div>
+                    </div>
+                    <div class="quick-actions">
+                        <a href="{% url 'admin:app_premiumpayment_add' %}" class="action-btn" title="Add Payment">
+                            <i class="fas fa-plus"></i>
+                        </a>
+                        <a href="{% url 'admin:app_premiumpayment_changelist' %}" class="action-btn" title="View All Payments">
+                            <i class="fas fa-list"></i>
+                        </a>
+                    </div>
                 </div>
-                <div class="metric-title">Total Premiums</div>
-                <div class="metric-value">
-                    <span class="currency-prefix">Rs.</span>
-                    {{ company_report.total_premiums|floatformat:0 }}
-                </div>
-                <div class="metric-subtitle">Revenue collected</div>
             </div>
         </div>
 
         <!-- Outstanding Premiums Card -->
         <div class="col-md-3">
             <div class="metric-card outstanding-card p-4 text-white">
-                <div class="metric-icon">
-                    <i class="fas fa-clock"></i>
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <div class="metric-icon">
+                            <i class="fas fa-clock"></i>
+                        </div>
+                        <div class="metric-title">Outstanding</div>
+                        <div class="metric-value">
+                            <span class="currency-prefix">Rs.</span>
+                            {{ company_report.outstanding_premiums|floatformat:0 }}
+                        </div>
+                        <div class="metric-subtitle">Pending payments</div>
+                    </div>
+                    <div class="quick-actions">
+                        <a href="{% url 'admin:app_premiumpayment_changelist' %}?payment_status__exact=Pending" class="action-btn" title="View Pending Payments">
+                            <i class="fas fa-exclamation-circle"></i>
+                        </a>
+                    </div>
                 </div>
-                <div class="metric-title">Outstanding</div>
-                <div class="metric-value">
-                    <span class="currency-prefix">Rs.</span>
-                    {{ company_report.outstanding_premiums|floatformat:0 }}
+            </div>
+        </div>
+    </div>
+
+    <!-- Additional Quick Actions -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="quick-actions-card">
+                <div class="quick-action-item">
+                    <a href="{% url 'admin:app_claimrequest_add' %}" class="quick-action-link">
+                        <i class="fas fa-file-invoice"></i>
+                        <span>New Claim</span>
+                    </a>
                 </div>
-                <div class="metric-subtitle">Pending payments</div>
+                <div class="quick-action-item">
+                    <a href="{% url 'admin:app_loan_add' %}" class="quick-action-link">
+                        <i class="fas fa-hand-holding-usd"></i>
+                        <span>New Loan</span>
+                    </a>
+                </div>
+                <div class="quick-action-item">
+                    <a href="{% url 'admin:app_agentapplication_add' %}" class="quick-action-link">
+                        <i class="fas fa-user-tie"></i>
+                        <span>New Agent</span>
+                    </a>
+                </div>
+                <div class="quick-action-item">
+                    <a href="{% url 'admin:app_salesagent_changelist' %}" class="quick-action-link">
+                        <i class="fas fa-users"></i>
+                        <span>Agents</span>
+                    </a>
+                </div>
+                
+                <div class="quick-action-item">
+                    <a href="{% url 'admin:app_mortalityrate_changelist' %}" class="quick-action-link">
+                        <i class="fas fa-calculator"></i>
+                        <span>Mortality Rates</span>
+                    </a>
+                </div>
             </div>
         </div>
     </div>

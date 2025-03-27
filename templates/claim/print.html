@@ -1,0 +1,389 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+    @page {
+        size: A4;
+        margin: 2cm;
+    }
+
+    .print-container {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        font-family: 'Segoe UI', Arial, sans-serif;
+        color: #333;
+        background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" opacity="0.03"><text x="0" y="40" font-family="Arial" font-size="20" font-weight="bold" fill="%23000">{{ company_name }}</text></svg>') center center;
+    }
+
+    .print-header {
+        text-align: center;
+        margin-bottom: 30px;
+        padding-bottom: 20px;
+        border-bottom: 2px solid #3a5c96;
+        color: #3a5c96;
+    }
+
+    .company-logo {
+        max-width: 200px;
+        margin-bottom: 15px;
+    }
+
+    .claim-title {
+        text-transform: uppercase;
+        font-size: 1.3em;
+        margin: 10px 0;
+        letter-spacing: 2px;
+        color: #555;
+    }
+
+    .claim-number {
+        font-size: 1.2em;
+        color: #666;
+        margin-top: 10px;
+        border: 1px solid #ddd;
+        display: inline-block;
+        padding: 5px 15px;
+        border-radius: 4px;
+        background-color: #f9f9f9;
+    }
+
+    .status-badge {
+        display: inline-block;
+        padding: 5px 10px;
+        border-radius: 4px;
+        font-weight: bold;
+        margin-top: 10px;
+        font-size: 0.9em;
+    }
+
+    .status-pending {
+        background-color: #fef9c3;
+        color: #854d0e;
+    }
+
+    .status-approved {
+        background-color: #dcfce7;
+        color: #166534;
+    }
+
+    .status-rejected {
+        background-color: #fee2e2;
+        color: #991b1b;
+    }
+
+    .status-processing {
+        background-color: #e0f2fe;
+        color: #075985;
+    }
+
+    .highlighted {
+        font-weight: bold;
+        color: #3a5c96;
+    }
+
+    .section {
+        margin-bottom: 30px;
+        page-break-inside: avoid;
+    }
+
+    .section-title {
+        background: linear-gradient(to right, #3a5c96, #5a7cb6);
+        color: white;
+        padding: 10px 15px;
+        margin-bottom: 15px;
+        font-weight: bold;
+        border-radius: 4px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .info-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 15px;
+        background-color: #f9f9f9;
+        padding: 15px;
+        border-radius: 4px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .info-item {
+        display: flex;
+        margin-bottom: 8px;
+    }
+
+    .info-label {
+        font-weight: bold;
+        min-width: 150px;
+        color: #3a5c96;
+    }
+
+    .info-value {
+        flex: 1;
+    }
+
+    .document-container {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 15px;
+        margin-top: 15px;
+    }
+
+    .document {
+        border: 1px solid #ddd;
+        padding: 10px;
+        text-align: center;
+        border-radius: 4px;
+        background-color: white;
+    }
+
+    .document img {
+        max-width: 100%;
+        max-height: 200px;
+        margin-bottom: 10px;
+    }
+
+    .document-title {
+        font-weight: bold;
+        font-size: 0.9em;
+        color: #555;
+    }
+
+    .footer {
+        margin-top: 50px;
+        padding-top: 20px;
+        border-top: 1px solid #ddd;
+        text-align: center;
+        font-size: 0.9em;
+        color: #666;
+    }
+
+    .company-stamp {
+        font-size: 1.2em;
+        font-weight: bold;
+        color: #3a5c96;
+        margin-bottom: 15px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    .signature-section {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 50px;
+    }
+
+    .signature-box {
+        width: 200px;
+        text-align: center;
+    }
+
+    .signature-line {
+        border-top: 1px solid #000;
+        margin-top: 50px;
+        margin-bottom: 10px;
+    }
+
+    .print-date {
+        margin-top: 15px;
+        font-size: 0.8em;
+        color: #888;
+    }
+
+    .serial-number {
+        margin-top: 5px;
+        font-size: 0.7em;
+        color: #999;
+        letter-spacing: 1px;
+    }
+
+    .disclaimer {
+        font-size: 0.8em;
+        font-style: italic;
+        color: #777;
+        border-top: 1px dashed #ddd;
+        padding-top: 10px;
+        margin-top: 15px;
+    }
+
+    .btn {
+        padding: 8px 16px;
+        font-size: 14px;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-right: 10px;
+        border: none;
+    }
+
+    .btn-primary {
+        background-color: #3a5c96;
+        color: white;
+    }
+
+    .btn-secondary {
+        background-color: #6c757d;
+        color: white;
+    }
+
+    .mb-3 {
+        margin-bottom: 15px;
+    }
+
+    @media print {
+        .no-print {
+            display: none;
+        }
+        
+        body {
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="print-container">
+    <div class="no-print">
+        <button onclick="window.print()" class="btn btn-primary mb-3"><strong>Print Claim</strong></button>
+        <button onclick="window.close()" class="btn btn-secondary mb-3">Close</button>
+    </div>
+
+    <div class="print-header">
+        {% if original.policy_holder.branch.company.logo %}
+            <img src="{{ original.policy_holder.branch.company.logo.url }}" alt="{{ company_name }} Logo" class="company-logo">
+        {% else %}
+            <img src="{{ STATIC_URL }}img/company-logo.png" alt="Company Logo" class="company-logo">
+        {% endif %}
+        <h1>{{ company_name }}</h1>
+        <h2 class="claim-title">INSURANCE CLAIM FORM</h2>
+        <div class="claim-number">Claim Reference #: <span class="highlighted">{{ original.id }}</span></div>
+        <div class="status-badge status-{{ original.status|lower }}">{{ original.status }}</div>
+    </div>
+
+    <div class="section">
+        <h2 class="section-title">Policyholder Information</h2>
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="info-label">Policyholder:</span>
+                <span class="info-value">{{ original.policy_holder.first_name }} {{ original.policy_holder.last_name }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Policy Number:</span>
+                <span class="info-value">{{ original.policy_holder.policy_number }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Policy Type:</span>
+                <span class="info-value">{{ original.policy_holder.policy.name }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Sum Assured:</span>
+                <span class="info-value">Rs. {{ original.policy_holder.sum_assured|floatformat:2 }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Contact Number:</span>
+                <span class="info-value">{{ original.policy_holder.phone_number }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Address:</span>
+                <span class="info-value">
+                    {% if original.policy_holder.province %}{{ original.policy_holder.province }}, {% endif %}
+                    {% if original.policy_holder.district %}{{ original.policy_holder.district }}, {% endif %}
+                    {% if original.policy_holder.municipality %}{{ original.policy_holder.municipality }}{% endif %}
+                    {% if original.policy_holder.ward %}- {{ original.policy_holder.ward }}{% endif %}
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2 class="section-title">Claim Details</h2>
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="info-label">Claim Date:</span>
+                <span class="info-value">{{ original.claim_date|date:"F j, Y" }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Claim Amount:</span>
+                <span class="info-value">Rs. {{ original.claim_amount|floatformat:2 }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Claim Type:</span>
+                <span class="info-value">{{ original.claim_type }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Status:</span>
+                <span class="info-value">{{ original.status }}</span>
+            </div>
+            {% if original.date_of_death %}
+            <div class="info-item">
+                <span class="info-label">Date of Death:</span>
+                <span class="info-value">{{ original.date_of_death|date:"F j, Y" }}</span>
+            </div>
+            {% endif %}
+            {% if original.cause_of_death %}
+            <div class="info-item">
+                <span class="info-label">Cause of Death:</span>
+                <span class="info-value">{{ original.cause_of_death }}</span>
+            </div>
+            {% endif %}
+            {% if original.description %}
+            <div class="info-item" style="grid-column: span 2;">
+                <span class="info-label">Description:</span>
+                <span class="info-value">{{ original.description }}</span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if original.death_certificate or original.medical_reports %}
+    <div class="section">
+        <h2 class="section-title">Supporting Documents</h2>
+        <div class="document-container">
+            {% if original.death_certificate %}
+            <div class="document">
+                <img src="{{ original.death_certificate.url }}" alt="Death Certificate">
+                <div class="document-title">Death Certificate</div>
+            </div>
+            {% endif %}
+            {% if original.medical_reports %}
+            <div class="document">
+                <img src="{{ original.medical_reports.url }}" alt="Medical Reports">
+                <div class="document-title">Medical Reports</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="section">
+        <h2 class="section-title">Declaration</h2>
+        <p>I hereby declare that the information provided in this claim form is true and accurate to the best of my knowledge. I understand that any false or misleading information may result in the rejection of this claim.</p>
+        
+        <p>I authorize {{ company_name }} to access any medical or other information necessary to process this claim. I understand that the company may require additional information or documentation to support this claim.</p>
+        
+        <div class="disclaimer">
+            <strong>Disclaimer:</strong> This document is computer-generated and serves as a reference only. The official claim contract and its terms prevail in case of any discrepancy. The company reserves the right to modify terms and conditions as per regulatory requirements.
+        </div>
+    </div>
+
+    <div class="footer">
+        <div class="company-stamp">{{ company_name }} - Trusted Insurance Provider</div>
+        <p>This document is computer generated and contains confidential information.</p>
+        <div class="signature-section">
+            <div class="signature-box">
+                <div class="signature-line"></div>
+                <p>Claimant's Signature</p>
+            </div>
+            <div class="signature-box">
+                <div class="signature-line"></div>
+                <p>Authorized Signatory</p>
+            </div>
+        </div>
+        <p class="print-date">Printed on: {% now "F j, Y" %}</p>
+        <div class="serial-number">Serial: CLM-{{ original.id }}-{% now "Ymd" %}</div>
+    </div>
+</div>
+{% endblock %} 

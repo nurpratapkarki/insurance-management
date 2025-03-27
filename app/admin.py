@@ -176,7 +176,7 @@ class UnderwritingInline(admin.StackedInline):
 @admin.register(PolicyHolder)
 class PolicyHolderAdmin(BranchFilterMixin, admin.ModelAdmin):
     list_display = ('policy_number','first_name', 'last_name', 'status', 'policy', 'sum_assured', 
-                    'payment_interval', 'occupation', 'maturity_date')
+                    'payment_interval', 'occupation', 'maturity_date', 'print_button')
     search_fields = ('first_name', 'last_name','policy_number')
     list_filter = ('status', 'policy', 'occupation')
     inlines = [BonusInline, UnderwritingInline]
@@ -251,6 +251,13 @@ class PolicyHolderAdmin(BranchFilterMixin, admin.ModelAdmin):
             return render(request, 'policyholder/print.html', context)
         except (PolicyHolder.DoesNotExist, ValidationError):
             return redirect('admin:app_policyholder_changelist')
+
+    def print_button(self, obj):
+        return format_html(
+            '<a class="button btn btn-info btn-sm" href="{}" onclick="window.open(this.href, \'_blank\', \'width=800,height=600\').print(); return false;">Print</a>',
+            reverse('admin:print_policy', args=[obj.pk])
+        )
+    print_button.short_description = 'Print'
 
     def get_queryset(self, request):
         """Limit PolicyHolder queryset to user's branch."""
@@ -329,16 +336,49 @@ def formfield_for_foreignkey(self, db_field, request, **kwargs):
 # Register Claim Request
 @admin.register(ClaimRequest)
 class ClaimRequestAdmin(admin.ModelAdmin, BranchFilterMixin):
-    list_display = ('policy_holder', 'claim_date', 'status', 'claim_amount')
+    list_display = ('policy_holder', 'claim_date', 'status', 'claim_amount', 'print_button')
     readonly_fields = ('claim_amount',)
     search_fields = ('policy_holder__first_name', 'policy_holder__last_name')
 
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                '<path:object_id>/print/',
+                self.admin_site.admin_view(self.print_claim),
+                name='print_claim_request',
+            ),
+        ]
+        return custom_urls + urls
+    
+    def print_claim(self, request, object_id):
+        try:
+            claim = self.get_object(request, object_id)
+            company_name = claim.policy_holder.branch.company.name if claim.policy_holder.branch and claim.policy_holder.branch.company else "Insurance Company"
+            
+            context = {
+                'title': f'Claim #{claim.id}',
+                'original': claim,
+                'company_name': company_name,
+                'opts': self.model._meta,
+                'media': self.media,
+            }
+            
+            return render(request, 'claim/print.html', context)
+        except (ClaimRequest.DoesNotExist, ValidationError):
+            return redirect('admin:app_claimrequest_changelist')
+    
+    def print_button(self, obj):
+        return format_html(
+            '<a class="button btn btn-info btn-sm" href="{}" onclick="window.open(this.href, \'_blank\', \'width=800,height=600\').print(); return false;">Print</a>',
+            reverse('admin:print_claim_request', args=[obj.pk])
+        )
+    print_button.short_description = 'Print'
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         if request.user.is_superuser:
             return qs
-        return qs.filter(branch=request.user.profile.branch)
 
 
 # Register Claim Processing
@@ -586,7 +626,7 @@ class PaymentProcessingAdmin(admin.ModelAdmin, BranchFilterMixin):
 
 @admin.register(AgentApplication)
 class AgentApplicationAdmin(BranchFilterMixin,admin.ModelAdmin):
-    list_display = ('id', 'first_name', 'last_name', 'branch', 'email', 'phone_number', 'status', 'created_at')
+    list_display = ('id', 'first_name', 'last_name', 'branch', 'email', 'phone_number', 'status', 'created_at', 'print_button')
     search_fields = ('first_name', 'last_name', 'email', 'phone_number')
     list_filter = ('branch', 'status', 'gender', 'created_at')
     ordering = ('-created_at',)
@@ -612,6 +652,42 @@ class AgentApplicationAdmin(BranchFilterMixin,admin.ModelAdmin):
             'fields': ('status', 'created_at')
         }),
     )
+    
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                '<path:object_id>/print/',
+                self.admin_site.admin_view(self.print_application),
+                name='print_agent_application',
+            ),
+        ]
+        return custom_urls + urls
+    
+    def print_application(self, request, object_id):
+        try:
+            application = self.get_object(request, object_id)
+            company_name = application.branch.company.name if application.branch and application.branch.company else "Insurance Company"
+            
+            context = {
+                'title': f'Agent Application: {application.first_name} {application.last_name}',
+                'original': application,
+                'company_name': company_name,
+                'opts': self.model._meta,
+                'media': self.media,
+            }
+            
+            return render(request, 'agentapplication/print.html', context)
+        except (AgentApplication.DoesNotExist, ValidationError):
+            return redirect('admin:app_agentapplication_changelist')
+    
+    def print_button(self, obj):
+        return format_html(
+            '<a class="button btn btn-info btn-sm" href="{}" onclick="window.open(this.href, \'_blank\', \'width=800,height=600\').print(); return false;">Print</a>',
+            reverse('admin:print_agent_application', args=[obj.pk])
+        )
+    print_button.short_description = 'Print'
+    
     def save_model(self, request, obj, form, change):
         # Automatically assign branch for non-superusers
         if not change and not request.user.is_superuser:
@@ -775,21 +851,61 @@ class MortalityRateAdmin(admin.ModelAdmin):
             context,
         )
 
-
+class LoanRepaymentInline(admin.StackedInline):
+    model = LoanRepayment
+    extra = 1
+    readonly_fields = ('repayment_date', 'remaining_loan_balance')
+    fields = ('amount', 'repayment_type', 'repayment_date', 'remaining_loan_balance')
+    can_delete = False
 
 #Loan Admin
 @admin.register(Loan)
 class LoanAdmin(admin.ModelAdmin, BranchFilterMixin):
-    list_display = ('policy_holder', 'loan_amount', 'remaining_balance', 'accrued_interest', 'loan_status', 'created_at')
+    list_display = ('policy_holder', 'loan_amount', 'remaining_balance', 'accrued_interest', 'loan_status', 'created_at', 'print_button')
     readonly_fields = ('remaining_balance', 'accrued_interest', 'last_interest_date')
     search_fields = ('policy_holder__first_name', 'policy_holder__last_name')
+    inlines = [LoanRepaymentInline]
     
-#Loan Repayment Admin
-@admin.register(LoanRepayment)
-class LoanRepaymentAdmin(BranchFilterMixin, admin.ModelAdmin):
-    list_display = ('loan', 'amount', 'repayment_type', 'repayment_date', 'remaining_loan_balance')
-    readonly_fields = ('remaining_loan_balance',)
-
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                '<path:object_id>/print/',
+                self.admin_site.admin_view(self.print_loan),
+                name='print_loan',
+            ),
+        ]
+        return custom_urls + urls
+    
+    def print_loan(self, request, object_id):
+        try:
+            loan = self.get_object(request, object_id)
+            company_name = loan.policy_holder.branch.company.name if loan.policy_holder.branch and loan.policy_holder.branch.company else "Insurance Company"
+            
+            # Get today's date and year for the footer
+            current_date = date.today()
+            current_year = current_date.year
+            
+            context = {
+                'title': f'Loan #{loan.id}',
+                'loan': loan,
+                'company_name': company_name,
+                'current_date': current_date,
+                'current_year': current_year,
+                'opts': self.model._meta,
+                'media': self.media,
+            }
+            
+            return render(request, 'loan/print.html', context)
+        except (Loan.DoesNotExist, ValidationError):
+            return redirect('admin:app_loan_changelist')
+    
+    def print_button(self, obj):
+        return format_html(
+            '<a class="button btn btn-info btn-sm" href="{}" onclick="window.open(this.href, \'_blank\', \'width=800,height=600\').print(); return false;">Print</a>',
+            reverse('admin:print_loan', args=[obj.pk])
+        )
+    print_button.short_description = 'Print'
 
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
@@ -799,9 +915,123 @@ class CompanyAdmin(admin.ModelAdmin):
 
 @admin.register(Branch)
 class BranchAdmin(admin.ModelAdmin):
-    list_display = ('name', 'branch_code', 'location')
+    list_display = ('name', 'branch_code', 'location', 'actions_buttons')
     search_fields = ('name', 'branch_code')
     list_filter = ('location',)
+    
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                '<path:object_id>/report/<str:period>/',
+                self.admin_site.admin_view(self.branch_report),
+                name='branch_report',
+            ),
+        ]
+        return custom_urls + urls
+    
+    def branch_report(self, request, object_id, period):
+        try:
+            branch = self.get_object(request, object_id)
+            company_name = branch.company.name if branch.company else "Insurance Company"
+            
+            today = date.today()
+            if period == 'weekly':
+                start_date = today - timedelta(days=7)
+                title = f"Weekly Report: {start_date.strftime('%b %d')} - {today.strftime('%b %d, %Y')}"
+            elif period == 'monthly':
+                # Get the first day of the current month
+                start_date = today.replace(day=1)
+                title = f"Monthly Report: {start_date.strftime('%B %Y')}"
+            elif period == 'yearly':
+                # Get the first day of the current year
+                start_date = today.replace(month=1, day=1)
+                title = f"Yearly Report: {start_date.strftime('%Y')}"
+            else:
+                # Default to last 30 days
+                start_date = today - timedelta(days=30)
+                title = f"30 Day Report: {start_date.strftime('%b %d')} - {today.strftime('%b %d, %Y')}"
+            
+            # Get policy holders for this branch in the date range
+            policy_holders = PolicyHolder.objects.filter(
+                branch=branch,
+                start_date__gte=start_date,
+                start_date__lte=today
+            )
+            
+            # Get premium payments for this branch in the date range
+            premium_payments = PremiumPayment.objects.filter(
+                policy_holder__branch=branch,
+                next_payment_date__gte=start_date
+            )
+            
+            # Get claims for this branch in the date range
+            claims = ClaimRequest.objects.filter(
+                policy_holder__branch=branch,
+                claim_date__gte=start_date,
+                claim_date__lte=today
+            )
+            
+            # Get loans for this branch in the date range
+            loans = Loan.objects.filter(
+                policy_holder__branch=branch,
+                created_at__gte=start_date,
+                created_at__lte=today
+            )
+            
+            # Get agents for this branch
+            agents = SalesAgent.objects.filter(branch=branch)
+            # Get agent applications in the date range
+            agent_applications = AgentApplication.objects.filter(
+                branch=branch,
+                created_at__gte=start_date,
+                created_at__lte=today
+            )
+            
+            # Calculate totals
+            total_policies = policy_holders.count()
+            total_premium = premium_payments.aggregate(total=Sum('paid_amount'))['total'] or 0
+            total_claims = claims.aggregate(total=Sum('claim_amount'))['total'] or 0
+            total_loans = loans.aggregate(total=Sum('loan_amount'))['total'] or 0
+            
+            context = {
+                'title': title,
+                'branch': branch,
+                'company_name': company_name,
+                'period': period,
+                'start_date': start_date,
+                'end_date': today,
+                'total_policies': total_policies,
+                'total_premium': total_premium,
+                'total_claims': total_claims,
+                'total_loans': total_loans,
+                'policy_holders': policy_holders[:50],  # Limit to 50 for performance
+                'premium_payments': premium_payments[:50],
+                'claims': claims[:50],
+                'loans': loans[:50],
+                'agents': agents[:50],
+                'agent_applications': agent_applications[:50],
+                'report_date': today,
+                'opts': self.model._meta,
+                'media': self.media,
+            }
+            
+            return render(request, 'branch/report.html', context)
+        except (Branch.DoesNotExist, ValidationError):
+            return redirect('admin:app_branch_changelist')
+    
+    def actions_buttons(self, obj):
+        return format_html(
+            '<div class="branch-actions">'
+            '<a class="button btn btn-info btn-sm" href="{}" onclick="window.open(this.href, \'_blank\', \'width=800,height=600\').print(); return false;" title="Weekly Report">Weekly</a> '
+            '<a class="button btn btn-success btn-sm" href="{}" onclick="window.open(this.href, \'_blank\', \'width=800,height=600\').print(); return false;" title="Monthly Report">Monthly</a> '
+            '<a class="button btn btn-warning btn-sm" href="{}" onclick="window.open(this.href, \'_blank\', \'width=800,height=600\').print(); return false;" title="Yearly Report">Yearly</a>'
+            '</div>',
+            reverse('admin:branch_report', args=[obj.pk, 'weekly']),
+            reverse('admin:branch_report', args=[obj.pk, 'monthly']),
+            reverse('admin:branch_report', args=[obj.pk, 'yearly']),
+        )
+    actions_buttons.short_description = 'Reports'
     
     def get_queryset(self, request):
         qs = super().get_queryset(request)

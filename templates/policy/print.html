@@ -1,0 +1,352 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+{% load static %}
+
+{% block extrastyle %}
+<style type="text/css">
+    @media print {
+        body * {
+            visibility: hidden;
+        }
+        .print-container, .print-container * {
+            visibility: visible;
+        }
+        .print-container {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+        }
+        .no-print {
+            display: none;
+        }
+    }
+    
+    .print-container {
+        max-width: 210mm;
+        margin: 0 auto;
+        padding: 20px;
+        font-family: Arial, sans-serif;
+        color: #333;
+    }
+    
+    .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        border-bottom: 2px solid #4a6f8a;
+        padding-bottom: 10px;
+    }
+    
+    .logo {
+        max-height: 80px;
+    }
+    
+    .document-title {
+        font-size: 24px;
+        font-weight: bold;
+        color: #4a6f8a;
+        text-align: center;
+        margin: 20px 0;
+    }
+    
+    .policy-reference {
+        text-align: right;
+        font-size: 14px;
+        margin-bottom: 15px;
+    }
+    
+    .section {
+        margin-bottom: 20px;
+        padding: 15px;
+        background-color: #f9f9f9;
+        border-radius: 5px;
+    }
+    
+    .section-title {
+        font-size: 18px;
+        font-weight: bold;
+        color: #4a6f8a;
+        margin-bottom: 10px;
+        border-bottom: 1px solid #ddd;
+        padding-bottom: 5px;
+    }
+    
+    .detail-row {
+        display: flex;
+        margin-bottom: 8px;
+    }
+    
+    .detail-label {
+        font-weight: bold;
+        width: 200px;
+        color: #555;
+    }
+    
+    .detail-value {
+        flex: 1;
+    }
+    
+    .status-badge {
+        padding: 5px 10px;
+        border-radius: 15px;
+        font-size: 12px;
+        font-weight: bold;
+        display: inline-block;
+        margin-left: 10px;
+    }
+    
+    .status-active {
+        background-color: #d4edda;
+        color: #155724;
+    }
+    
+    .status-inactive {
+        background-color: #f8d7da;
+        color: #721c24;
+    }
+    
+    .footer {
+        margin-top: 30px;
+        padding-top: 20px;
+        border-top: 1px solid #ddd;
+        font-size: 12px;
+        color: #777;
+    }
+    
+    .signature-section {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 50px;
+    }
+    
+    .signature-box {
+        width: 45%;
+    }
+    
+    .signature-line {
+        border-top: 1px solid #000;
+        margin-top: 50px;
+        margin-bottom: 10px;
+    }
+    
+    .print-button {
+        background-color: #4a6f8a;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 14px;
+        margin-bottom: 20px;
+    }
+    
+    .print-button:hover {
+        background-color: #3a5a71;
+    }
+    
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 20px;
+    }
+    
+    table, th, td {
+        border: 1px solid #ddd;
+    }
+    
+    th, td {
+        padding: 10px;
+        text-align: left;
+    }
+    
+    th {
+        background-color: #f2f2f2;
+        color: #555;
+    }
+    
+    tr:nth-child(even) {
+        background-color: #f9f9f9;
+    }
+    
+    @page {
+        size: A4;
+        margin: 10mm;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<button onclick="window.print();" class="print-button no-print">{% trans "Print Policy Document" %}</button>
+
+<div class="print-container">
+    <div class="header">
+        <img src="{% if company_logo %}{{ company_logo }}{% else %}{% static 'admin/img/logo.png' %}{% endif %}" alt="Company Logo" class="logo">
+        <h2>{{ company_name|default:"Insurance Company" }}</h2>
+    </div>
+    
+    <h1 class="document-title">POLICY CERTIFICATE</h1>
+    
+    <div class="policy-reference">
+        <span class="detail-label">Policy Number:</span>
+        <strong>{{ policy.policy_number }}</strong>
+        <span class="status-badge {% if policy.is_active %}status-active{% else %}status-inactive{% endif %}">
+            {% if policy.is_active %}Active{% else %}Inactive{% endif %}
+        </span>
+    </div>
+
+    <div class="section">
+        <h3 class="section-title">Personal Information</h3>
+        <div class="detail-row">
+            <span class="detail-label">Name:</span>
+            <span class="detail-value">{{ policy.user.get_full_name }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Date of Birth:</span>
+            <span class="detail-value">{{ policy.date_of_birth }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Gender:</span>
+            <span class="detail-value">{{ policy.get_gender_display }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Email:</span>
+            <span class="detail-value">{{ policy.user.email }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Phone:</span>
+            <span class="detail-value">{{ policy.user.phone_number }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Address:</span>
+            <span class="detail-value">{{ policy.address }}</span>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3 class="section-title">Policy Details</h3>
+        <div class="detail-row">
+            <span class="detail-label">Policy Type:</span>
+            <span class="detail-value">{{ policy.policy_type }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Policy Amount:</span>
+            <span class="detail-value">{{ policy.policy_amount }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Premium Amount:</span>
+            <span class="detail-value">{{ policy.premium_amount }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Start Date:</span>
+            <span class="detail-value">{{ policy.start_date }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">End Date:</span>
+            <span class="detail-value">{{ policy.end_date }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Payment Frequency:</span>
+            <span class="detail-value">{{ policy.get_payment_frequency_display }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Branch:</span>
+            <span class="detail-value">{{ policy.branch.name }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Agent:</span>
+            <span class="detail-value">{{ policy.agent.user.get_full_name }}</span>
+        </div>
+    </div>
+
+    {% if policy.nominees.all %}
+    <div class="section">
+        <h3 class="section-title">Nominees</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Relationship</th>
+                    <th>Contact</th>
+                    <th>Percentage</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for nominee in policy.nominees.all %}
+                <tr>
+                    <td>{{ nominee.name }}</td>
+                    <td>{{ nominee.get_relationship_display }}</td>
+                    <td>{{ nominee.contact }}</td>
+                    <td>{{ nominee.percentage }}%</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% if policy.premium_payments.all %}
+    <div class="section">
+        <h3 class="section-title">Recent Premium Payments</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Amount</th>
+                    <th>Receipt No.</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for payment in policy.premium_payments.all|slice:":5" %}
+                <tr>
+                    <td>{{ payment.payment_date }}</td>
+                    <td>{{ payment.amount }}</td>
+                    <td>{{ payment.receipt_number }}</td>
+                    <td>{% if payment.is_confirmed %}Confirmed{% else %}Pending{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <div class="section">
+        <h3 class="section-title">Terms and Conditions</h3>
+        <p>
+            1. This policy is subject to the terms and conditions outlined in the policy document.
+        </p>
+        <p>
+            2. Premium payments must be made according to the agreed payment frequency.
+        </p>
+        <p>
+            3. Failure to pay premiums may result in policy lapse.
+        </p>
+        <p>
+            4. Claims are subject to verification and approval by the insurance company.
+        </p>
+    </div>
+
+    <div class="signature-section">
+        <div class="signature-box">
+            <div class="signature-line"></div>
+            <p>Policy Holder Signature</p>
+            <p>{{ policy.user.get_full_name }}</p>
+            <p>Date: _______________</p>
+        </div>
+        <div class="signature-box">
+            <div class="signature-line"></div>
+            <p>Authorized Signatory</p>
+            <p>{{ company_name|default:"Insurance Company" }}</p>
+            <p>Date: _______________</p>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>&copy; {{ current_year }} {{ company_name|default:"Insurance Company" }}. All rights reserved.</p>
+        <p>This document was generated on {{ current_date }}.</p>
+        <p>Document ID: {{ policy.policy_number }}-{{ current_date|date:"Ymd" }}</p>
+    </div>
+</div>
+{% endblock %}
