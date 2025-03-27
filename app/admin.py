@@ -1161,9 +1161,64 @@ admin.site.register(PolicyRenewal, PolicyRenewalAdmin)
 
 @admin.register(PolicyHolder)
 class PolicyHolderAdmin(BranchFilterMixin, admin.ModelAdmin):
-    list_display = ('policy_number', 'first_name', 'last_name', 'status', 'policy', 'sum_assured', 'payment_interval')
+    list_display = ('policy_number', 'first_name', 'last_name', 'status', 'policy', 'sum_assured', 'payment_interval', 'print_button')
     search_fields = ('first_name', 'last_name', 'policy_number')
     list_filter = ('status', 'policy', 'occupation')
+    
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                'print-policy/<int:policy_id>/',
+                self.admin_site.admin_view(self.print_policy_document),
+                name='print-policy-document',
+            ),
+        ]
+        return custom_urls + urls
+    
+    def print_button(self, obj):
+        """Generate print button for policy document"""
+        if obj and obj.pk:
+            url = reverse('admin:print-policy-document', args=[obj.pk])
+            return format_html(
+                '<a class="button" href="{}" target="_blank" style="background-color:#2980b9;color:white;padding:6px 12px;border-radius:4px;text-decoration:none;display:inline-block;font-weight:bold;text-align:center;">'
+                '<i class="fas fa-print" style="margin-right:5px;"></i> Print Policy</a>',
+                url
+            )
+        return ""
+    print_button.short_description = ""
+    
+    def print_policy_document(self, request, policy_id):
+        """View to print policy document"""
+        try:
+            policy_holder = PolicyHolder.objects.get(pk=policy_id)
+            
+            # Get company info
+            company_name = policy_holder.branch.company.name if policy_holder.branch and policy_holder.branch.company else "Insurance Company"
+            company_logo = policy_holder.branch.company.logo if policy_holder.branch and policy_holder.branch.company else None
+            company_address = policy_holder.branch.company.address if policy_holder.branch and policy_holder.branch.company else None
+            
+            # Get premium info
+            premium_payment = policy_holder.premium_payments.first()
+            
+            context = {
+                'title': 'Policy Document',
+                'policy_holder': policy_holder,
+                'premium_payment': premium_payment,
+                'company_name': company_name,
+                'company_logo': company_logo,
+                'company_address': company_address,
+                'today': date.today(),
+            }
+            
+            return TemplateResponse(
+                request,
+                'policy/print_document.html',
+                context,
+            )
+        except PolicyHolder.DoesNotExist:
+            messages.error(request, "Policy holder record not found.")
+            return redirect('admin:app_policyholder_changelist')
     
     def get_queryset(self, request):
         qs = super().get_queryset(request)

@@ -1,0 +1,460 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+{% load static %}
+
+{% block extrastyle %}
+<style type="text/css">
+    @media print {
+        body {
+            padding: 0;
+            margin: 0;
+            font-size: 12pt;
+            background-color: white;
+        }
+        
+        button {
+            display: none;
+        }
+        
+        .print-container {
+            width: 100%;
+            padding: 1cm;
+            box-shadow: none;
+        }
+        
+        @page {
+            size: letter;
+            margin: 1cm;
+        }
+    }
+    
+    body {
+        background-color: #f8f9fa;
+        font-family: Arial, sans-serif;
+    }
+    
+    .print-container {
+        background-color: white;
+        width: 21cm;
+        min-height: 29.7cm;
+        margin: 1cm auto;
+        padding: 2cm;
+        box-shadow: 0 0 0.5cm rgba(0,0,0,0.1);
+        position: relative;
+    }
+    
+    .watermark {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) rotate(-45deg);
+        font-size: 8em;
+        color: rgba(220, 220, 220, 0.3);
+        z-index: 0;
+        pointer-events: none;
+    }
+    
+    .print-header {
+        text-align: center;
+        margin-bottom: 2cm;
+        position: relative;
+        z-index: 1;
+    }
+    
+    .print-header img {
+        max-height: 2cm;
+        margin-bottom: 0.5cm;
+    }
+    
+    .print-header h1 {
+        font-size: 24pt;
+        margin: 0;
+        color: #2c3e50;
+    }
+    
+    .print-header h2 {
+        font-size: 14pt;
+        margin: 0.5cm 0 0 0;
+        color: #7f8c8d;
+    }
+    
+    .policy-info {
+        margin-bottom: 1.5cm;
+        position: relative;
+        z-index: 1;
+    }
+    
+    .policy-info h3 {
+        font-size: 16pt;
+        border-bottom: 1px solid #eee;
+        padding-bottom: 0.2cm;
+        margin-bottom: 0.5cm;
+        color: #2c3e50;
+    }
+    
+    .info-item {
+        margin-bottom: 0.3cm;
+        display: flex;
+    }
+    
+    .info-label {
+        font-weight: bold;
+        width: 40%;
+    }
+    
+    .info-value {
+        width: 60%;
+    }
+    
+    .policy-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 1cm 0;
+        position: relative;
+        z-index: 1;
+    }
+    
+    .policy-table th, 
+    .policy-table td {
+        padding: 0.3cm;
+        border: 1px solid #ddd;
+    }
+    
+    .policy-table th {
+        background-color: #f2f2f2;
+        text-align: left;
+    }
+    
+    .policy-table tr:nth-child(even) {
+        background-color: #f9f9f9;
+    }
+    
+    .policy-total {
+        font-weight: bold;
+    }
+    
+    .personal-details {
+        margin-bottom: 1.5cm;
+        position: relative;
+        z-index: 1;
+    }
+    
+    .policy-details {
+        margin-bottom: 1.5cm;
+        position: relative;
+        z-index: 1;
+    }
+    
+    .policy-terms {
+        margin-bottom: 1.5cm;
+        position: relative;
+        z-index: 1;
+        font-size: 10pt;
+    }
+    
+    .policy-footer {
+        margin-top: 2cm;
+        text-align: center;
+        font-size: 10pt;
+        color: #7f8c8d;
+        position: relative;
+        z-index: 1;
+    }
+    
+    .policy-signatures {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 2cm;
+        position: relative;
+        z-index: 1;
+    }
+    
+    .signature-block {
+        text-align: center;
+        width: 45%;
+    }
+    
+    .signature-line {
+        border-top: 1px solid #000;
+        margin: 2cm 0 0.2cm 0;
+    }
+    
+    .print-button {
+        background-color: #2980b9;
+        color: white;
+        border: none;
+        padding: 15px 25px;
+        font-size: 16px;
+        cursor: pointer;
+        margin: 20px auto;
+        display: block;
+        border-radius: 5px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        transition: background-color 0.3s;
+        font-weight: bold;
+    }
+    
+    .print-button:hover {
+        background-color: #3498db;
+    }
+    
+    .print-button-container {
+        text-align: center;
+        margin: 20px 0;
+        padding: 10px;
+        background-color: #f5f5f5;
+        border-radius: 5px;
+    }
+    
+    .status-badge {
+        display: inline-block;
+        padding: 5px 10px;
+        border-radius: 3px;
+        font-weight: bold;
+        color: white;
+    }
+    
+    .status-active {
+        background-color: #2ecc71;
+    }
+    
+    .status-pending {
+        background-color: #f39c12;
+    }
+    
+    .status-inactive {
+        background-color: #e74c3c;
+    }
+    
+    .policy-serial {
+        position: absolute;
+        top: 1cm;
+        right: 2cm;
+        font-size: 12pt;
+        color: #7f8c8d;
+        font-weight: bold;
+    }
+    
+    .border-fancy {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        border: 1px solid #ccc;
+        pointer-events: none;
+        z-index: 0;
+    }
+    
+    .border-fancy:before {
+        content: "";
+        position: absolute;
+        top: 0.5cm;
+        left: 0.5cm;
+        right: 0.5cm;
+        bottom: 0.5cm;
+        border: 1px solid #ccc;
+    }
+    
+    .qr-code {
+        position: absolute;
+        bottom: 2cm;
+        right: 2cm;
+        width: 2cm;
+        height: 2cm;
+        background-color: #f8f9fa;
+        padding: 0.2cm;
+        border: 1px solid #eee;
+    }
+</style>
+<script>
+    // Automatically trigger print dialog after page loads
+    window.onload = function() {
+        // Small delay to ensure everything is loaded
+        setTimeout(function() {
+            window.print();
+        }, 500);
+    };
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="print-button-container">
+    <button class="print-button" onclick="window.print()">
+        <i class="fas fa-print" style="margin-right: 8px;"></i> {% trans "Print Policy Document" %}
+    </button>
+</div>
+
+<div class="print-container">
+    <div class="border-fancy"></div>
+    <div class="watermark">OFFICIAL</div>
+    
+    <div class="policy-serial">№ {{ policy_holder.policy_number|default:"000000" }}</div>
+    
+    <div class="print-header">
+        {% if company_logo %}
+            <img src="{{ company_logo.url }}" alt="{{ company_name }} Logo">
+        {% endif %}
+        <h1>{{ company_name }}</h1>
+        <h2>{% trans "INSURANCE POLICY CERTIFICATE" %}</h2>
+        {% if company_address %}
+            <p>{{ company_address }}</p>
+        {% endif %}
+    </div>
+    
+    <div class="policy-info">
+        <h3>{% trans "Policy Information" %}</h3>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Policy Number:" %}</div>
+            <div class="info-value">{{ policy_holder.policy_number }}</div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Policy Type:" %}</div>
+            <div class="info-value">{{ policy_holder.policy.name|default:"" }}</div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Status:" %}</div>
+            <div class="info-value">
+                <span class="status-badge status-{% if policy_holder.status == 'Active' %}active{% elif policy_holder.status == 'Pending' %}pending{% else %}inactive{% endif %}">
+                    {{ policy_holder.status }}
+                </span>
+            </div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Issue Date:" %}</div>
+            <div class="info-value">{{ policy_holder.start_date }}</div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Maturity Date:" %}</div>
+            <div class="info-value">{{ policy_holder.maturity_date }}</div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Sum Assured:" %}</div>
+            <div class="info-value">Rs. {{ policy_holder.sum_assured|floatformat:2 }}</div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Payment Interval:" %}</div>
+            <div class="info-value">{{ policy_holder.get_payment_interval_display }}</div>
+        </div>
+        
+        {% if premium_payment %}
+        <div class="info-item">
+            <div class="info-label">{% trans "Premium Amount:" %}</div>
+            <div class="info-value">Rs. {{ premium_payment.interval_payment|floatformat:2 }}</div>
+        </div>
+        {% endif %}
+    </div>
+    
+    <div class="personal-details">
+        <h3>{% trans "Policyholder Details" %}</h3>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Full Name:" %}</div>
+            <div class="info-value">{{ policy_holder.first_name }} {% if policy_holder.middle_name %}{{ policy_holder.middle_name }} {% endif %}{{ policy_holder.last_name }}</div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Gender:" %}</div>
+            <div class="info-value">{{ policy_holder.get_gender_display }}</div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Date of Birth:" %}</div>
+            <div class="info-value">{{ policy_holder.date_of_birth }}</div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Contact Number:" %}</div>
+            <div class="info-value">{{ policy_holder.phone_number }}</div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Email:" %}</div>
+            <div class="info-value">{{ policy_holder.email|default:"N/A" }}</div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Address:" %}</div>
+            <div class="info-value">{{ policy_holder.ward }}, {{ policy_holder.municipality }}, {{ policy_holder.district }}, {{ policy_holder.get_province_display }}</div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "ID Document:" %}</div>
+            <div class="info-value">{{ policy_holder.get_document_type_display }} - {{ policy_holder.document_number }}</div>
+        </div>
+    </div>
+    
+    <div class="policy-details">
+        <h3>{% trans "Nominee Details" %}</h3>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Nominee Name:" %}</div>
+            <div class="info-value">{{ policy_holder.nominee_name|default:"N/A" }}</div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Relation:" %}</div>
+            <div class="info-value">{{ policy_holder.nominee_relation|default:"N/A" }}</div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "ID Document:" %}</div>
+            <div class="info-value">
+                {% if policy_holder.nominee_document_type %}
+                    {{ policy_holder.get_nominee_document_type_display }} - {{ policy_holder.nominee_document_number }}
+                {% else %}
+                    N/A
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="policy-terms">
+        <h3>{% trans "Terms and Conditions" %}</h3>
+        <ol>
+            <li><strong>Premium Payment:</strong> Policy premiums must be paid according to the agreed payment schedule {{ policy_holder.get_payment_interval_display }}. A grace period of 15 days is allowed for premium payments after which penalties may apply at the rate of 1% per month on the outstanding amount.</li>
+            <li><strong>Policy Revival:</strong> If the policy lapses due to non-payment, it may be revived within a period of 2 years from the date of first unpaid premium, subject to payment of all arrears with interest and providing evidence of continued insurability to the satisfaction of the company.</li>
+            <li><strong>Surrender Value:</strong> The policy acquires a surrender value after completion of 3 full years of premium payment. The surrender value will be calculated as per the company's prevailing terms and according to the policy type ({{ policy_holder.policy.policy_type }}).</li>
+            <li><strong>Death Benefit:</strong> In the event of the policyholder's death during the policy term, the sum assured Rs. {{ policy_holder.sum_assured }} plus any accumulated bonuses will be paid to the nominee ({{ policy_holder.nominee_name|default:"as specified" }}).</li>
+            <li><strong>Maturity Benefit:</strong> On survival to the end of the policy term {{ policy_holder.duration_years }} years, the sum assured plus vested bonuses will be paid to the policyholder.</li>
+            <li><strong>Loan Facility:</strong> Policy loans may be granted after the policy has acquired surrender value, subject to terms and conditions. The maximum loan amount shall not exceed 90% of the surrender value.</li>
+            <li><strong>Free Look Period:</strong> The policyholder has the right to review the policy terms within 15 days from the date of receipt of the policy document. If dissatisfied, the policy can be returned for cancellation, subject to deduction of expenses incurred by the company.</li>
+            <li><strong>Exclusions:</strong> No benefits will be payable in case of suicide within 12 months from the date of commencement or revival of the policy. Other standard exclusions apply as per company policy.</li>
+            <li><strong>Nomination:</strong> The policyholder can nominate a person to receive the policy benefits in case of the policyholder's death. The nomination can be changed at any time during the policy term.</li>
+            <li><strong>Assignment:</strong> The policy can be assigned as security for a loan or transferred to another person. The company must be notified of any assignment in writing.</li>
+            <li><strong>Alterations:</strong> The policyholder may request changes to the policy, such as change of address, nomination, or assignment, by giving written notice to the company.</li>
+            <li><strong>Jurisdiction:</strong> All disputes are subject to the jurisdiction of courts in the location of the issuing office {{ policy_holder.branch.location|default:"Head Office" }}.</li>
+        </ol>
+    </div>
+    
+    <div class="policy-signatures">
+        <div class="signature-block">
+            <div class="signature-line"></div>
+            <div>{% trans "Policyholder's Signature" %}</div>
+        </div>
+        
+        <div class="signature-block">
+            <div class="signature-line"></div>
+            <div>{% trans "Authorized Signatory" %}</div>
+        </div>
+    </div>
+    
+    <div class="policy-footer">
+        <p>{% trans "This is an official policy document. No signature is required on printed copy." %}</p>
+        <p>{% trans "Document generated on" %} {{ today }}</p>
+        <p>{% trans "Document ID:" %} POL-{{ policy_holder.policy_number|default:"000000" }}-{{ today|date:"Ymd" }}</p>
+        <p>&copy; {{ company_name }} {% now "Y" %}</p>
+    </div>
+    
+    <div class="qr-code">
+        <!-- Placeholder for QR code -->
+    </div>
+</div>
+{% endblock %} 
