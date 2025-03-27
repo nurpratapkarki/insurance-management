@@ -1,6 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User, AbstractUser
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from django.core.exceptions import ValidationError
 from django.db.models.signals import post_save
@@ -362,8 +362,8 @@ class PolicyHolder(models.Model):
     age = models.PositiveIntegerField(editable=False, null=True)
     phone_number = models.CharField(
         max_length=15,
-        unique=True,
-        null=True,
+        unique=True, 
+        null=True, 
         blank=True
     )
     email = models.EmailField(max_length=200, null=True, blank=True)
@@ -373,7 +373,7 @@ class PolicyHolder(models.Model):
         max_length=15, blank=True, null=True)
 
     document_number = models.CharField(
-        max_length=50,
+        max_length=50, 
         default=1
     )
     document_type = models.CharField(
@@ -409,16 +409,16 @@ class PolicyHolder(models.Model):
     ward = models.CharField(max_length=255)
     nearest_hospital = models.CharField(max_length=255, blank=True, null=True)
     natural_hazard_exposure = models.CharField(
-        max_length=50,
+        max_length=50, 
         choices= RISK_CHOICES,
-        blank=True,
+        blank=True, 
         null=True
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')
     work_environment_risk = models.CharField(
     max_length=50, 
     choices=RISK_CHOICES, 
-    blank=True, 
+        blank=True, 
     null=True)    
     policy = models.ForeignKey(
         InsurancePolicy, related_name='policy_holders', on_delete=models.CASCADE, blank=True, null=True
@@ -428,7 +428,7 @@ class PolicyHolder(models.Model):
     exercise_frequency = models.CharField(
         max_length=50,
         choices=EXE_FREQ_CHOICE,
-        blank=True,
+        blank=True, 
         null=True
     )
     alcoholic = models.BooleanField(default= False)
@@ -457,7 +457,7 @@ class PolicyHolder(models.Model):
         max_length=50,
         choices=[('Low', 'Low Risk'), ('Moderate', 'Moderate Risk'), ('High', 'High Risk')],
         default='Moderate',
-        blank=True,
+        blank=True, 
         help_text="Risk category assigned based on underwriting."
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')
@@ -466,6 +466,35 @@ class PolicyHolder(models.Model):
     start_date = models.DateField(default=date.today)
 
     maturity_date = models.DateField(null=True, blank=True)
+    
+    # Nepal Regulatory Fields
+    beema_samiti_reg_number = models.CharField(
+        max_length=50, 
+        blank=True, 
+        null=True,
+        help_text="Beema Samiti (Insurance Board) registration number"
+    )
+    citizenship_number = models.CharField(
+        max_length=30, 
+        blank=True, 
+        null=True, 
+        help_text="Nepal citizenship number"
+    )
+    kyc_verified = models.BooleanField(
+        default=False,
+        help_text="Know Your Customer verification status"
+    )
+    approval_date = models.DateField(
+        blank=True, 
+        null=True,
+        help_text="Date when policy was approved by regulatory authority"
+    )
+    tax_status = models.CharField(
+        max_length=20,
+        choices=[('Exempt', 'Tax Exempt'), ('Taxable', 'Taxable')],
+        default='Taxable',
+        help_text="Tax status for premium payments and benefits"
+    )
     
     def clean(self):
         errors = {}
@@ -511,11 +540,106 @@ class PolicyHolder(models.Model):
         except Exception as e:
             raise ValueError(f"Error generating policy number: {e}")
 
-        def save(self, *args, **kwargs):
-            """Override save to handle automatic field updates."""
-            if not self.policy_number:
-                self.policy_number = self.generate_policy_number()
-            super().save(*args, **kwargs)
+    def check_for_maturity(self):
+        """Check if policy has reached maturity date"""
+        if self.status != 'Active':
+            return False
+            
+        today = date.today()
+        if self.maturity_date and today >= self.maturity_date:
+            logger.info(f"Policy {self.id} has reached maturity on {self.maturity_date}")
+            self.surrender_policy('Maturity')
+            return True
+        return False
+        
+    def surrender_policy(self, surrender_type='Voluntary', reason=None):
+        """Surrender the policy and create a surrender request"""
+        if self.status == 'Surrendered':
+            return False
+            
+        try:
+            # Create surrender request
+            surrender = PolicySurrender.objects.create(
+                policy_holder=self,
+                surrender_type=surrender_type,
+                surrender_reason=reason
+            )
+            
+            # Auto-approve for maturity surrenders
+            if surrender_type == 'Maturity':
+                admin_user = User.objects.filter(is_superuser=True).first()
+                if admin_user:
+                    surrender.approve_surrender(admin_user)
+                else:
+                    # Mark policy as surrendered even without admin user
+                    self.status = 'Surrendered'
+                    self.save(update_fields=['status'])
+            
+            # Auto-approve for automatic surrenders
+            if surrender_type == 'Automatic':
+                admin_user = User.objects.filter(is_superuser=True).first()
+                if admin_user:
+                    surrender.approve_surrender(admin_user)
+                else:
+                    # Mark policy as surrendered even without admin user
+                    self.status = 'Surrendered'
+                    self.save(update_fields=['status'])
+                    
+            logger.info(f"Policy {self.id} has been surrendered via {surrender_type}")
+            return surrender
+            
+        except Exception as e:
+            logger.error(f"Error surrendering policy {self.id}: {str(e)}")
+            return False
+
+    def check_for_renewal(self):
+        """Check if policy needs renewal and create renewal record if needed."""
+        from datetime import timedelta
+        
+        # Only check for renewal for annual payment policies that are active
+        if self.status != 'Active' or self.payment_interval != 'annual':
+            return False
+            
+        today = date.today()
+        
+        # Calculate 60 days before maturity as the renewal notification date
+        if self.maturity_date:
+            renewal_due_date = self.maturity_date - timedelta(days=60)
+            
+            # If we're within 60 days of maturity and no renewal record exists yet
+            if today >= renewal_due_date and not self.renewals.filter(
+                due_date=self.maturity_date, 
+                status__in=['Pending', 'Renewed']
+            ).exists():
+                # Get premium amount from premium payment
+                premium_payment = self.premium_payments.first()
+                renewal_amount = premium_payment.annual_premium if premium_payment else Decimal('0.00')
+                
+                # Create renewal record
+                renewal = PolicyRenewal.objects.create(
+                    policy_holder=self,
+                    due_date=self.maturity_date,
+                    renewal_amount=renewal_amount
+                )
+                
+                # Send first reminder immediately upon creation
+                renewal.send_reminder('first')
+                
+                logger.info(f"Renewal record created for policy {self.policy_number}")
+                return renewal
+                
+        return False
+    
+    def get_active_renewal(self):
+        """Get any active (pending) renewal for this policy."""
+        return self.renewals.filter(status='Pending').first()
+    
+    def renew_policy(self, user):
+        """Renew this policy."""
+        active_renewal = self.get_active_renewal()
+        if active_renewal:
+            return active_renewal.mark_as_renewed(user)
+        return False
 
     def save(self, *args, **kwargs):
         """Override save method to handle automatic field updates"""
@@ -531,6 +655,11 @@ class PolicyHolder(models.Model):
         if not self.maturity_date:
             self.maturity_date = self.calculate_maturity_date()
         
+        # Check for policy maturity
+        if self.pk and self.status == 'Active':
+            self.check_for_maturity()
+            self.check_for_renewal()  # Check for renewal needs
+            
         # Run full validation
         self.full_clean()
         
@@ -1236,7 +1365,7 @@ class PremiumPayment(models.Model):
         max_digits=12, 
         decimal_places=2, 
         default=0.00, 
-        help_text="Late payment fine that was paid"
+        help_text="Late payment fine paid"
     )
     gsv_value = models.DecimalField(
         max_digits=12, 
@@ -1250,7 +1379,38 @@ class PremiumPayment(models.Model):
         default=0.00, 
         help_text="Special Surrender Value"
     )
-
+    # New Nepal tax and payment tracking fields
+    payment_date = models.DateField(
+        auto_now_add=True,
+        help_text="Date when the payment was made",
+        null=True,
+        blank=True
+    )
+    vat_amount = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        default=0.00, 
+        help_text="VAT amount (13% in Nepal)"
+    )
+    service_tax = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        default=0.00, 
+        help_text="Insurance service tax"
+    )
+    tds_amount = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        default=0.00, 
+        help_text="TDS (Tax Deducted at Source) if applicable"
+    )
+    receipt_number = models.CharField(
+        max_length=50, 
+        blank=True, 
+        null=True, 
+        help_text="Receipt number for this payment"
+    )
+    
     def calculate_premium(self):
         """Calculate total and interval premiums for the policy."""
         try:
@@ -1348,37 +1508,48 @@ class PremiumPayment(models.Model):
         except Exception as e:
             logger.error(f"PREMIUM CALCULATION - Unexpected error: {str(e)}")
             return Decimal('0.00'), Decimal('0.00')
+    
+    # New method for tax calculation
+    def calculate_taxes(self):
+        """Calculate tax amounts based on Nepal regulations"""
+        # VAT calculation (13%)
+        self.vat_amount = round(self.paid_amount * Decimal('0.13'), 2)
+        
+        # Service tax (1% for insurance in Nepal)
+        self.service_tax = round(self.paid_amount * Decimal('0.01'), 2)
+        
+        # TDS calculation (if applicable, usually 15% for agent commission)
+        if self.policy_holder.agent:
+            # Calculate commission amount (typically 15-25% of premium in Nepal)
+            commission_rate = getattr(self.policy_holder.agent, 'commission_rate', Decimal('15'))
+            commission_amount = (self.paid_amount * commission_rate) / Decimal('100')
+            self.tds_amount = round(commission_amount * Decimal('0.15'), 2)
             
+        return self.vat_amount + self.service_tax + self.tds_amount
+    
     def add_payment(self, amount):
-        """Add a payment to the premium record"""
-        # Convert amount to Decimal if it's not already
-        if not isinstance(amount, Decimal):
-            try:
-                amount = Decimal(str(amount))
-            except (ValueError, TypeError):
-                raise ValidationError(f"Invalid payment amount: {amount}. Must be a valid number.")
+        """Record a premium payment."""
+        # Check if policy is surrendered
+        if self.policy_holder.status == 'Surrendered':
+            raise ValidationError("Cannot add payment to a surrendered policy.")
         
-        # Validate payment amount
+        # Convert to Decimal for safe operations
+        amount = Decimal(str(amount))
+        
+        # Check for valid amount
         if amount <= 0:
-            raise ValidationError("Payment amount must be greater than zero")
-            
-        # Calculate current payment due (interval payment + any fine)
-        current_fine = self.calculate_fine()
+            raise ValidationError("Payment amount must be greater than zero.")
+        
+        # Get the expected amount (current interval payment + any due fine)
         expected_amount = self.interval_payment
-        total_with_fine = expected_amount
+        total_with_fine = expected_amount + self.fine_due
         
-        # Update fine due if needed
-        if current_fine > 0:
-            self.fine_due = current_fine
-            total_with_fine += current_fine
-            
-        # Reject if amount is less than expected
+        # Handle payment cases
         if amount < expected_amount:
-            raise ValidationError(f"Payment amount ({amount}) is less than required premium ({expected_amount})")
-        
-        # Check if payment includes fine
-        if amount > expected_amount and amount <= total_with_fine:
-            # This payment includes fine
+            # Partial payment not accepted
+            raise ValidationError(f"Payment amount ({amount}) is less than the required amount ({expected_amount}). Please pay the full amount.")
+        elif amount > expected_amount and amount <= total_with_fine:
+            # Payment includes fine
             self.fine_paid += (amount - expected_amount)
             logger.info(f"Payment includes fine of {amount - expected_amount}")
         elif amount > total_with_fine:
@@ -1404,7 +1575,8 @@ class PremiumPayment(models.Model):
         self.save()
         
         return True
-        
+    
+    # Modify the save method to include tax calculations
     def save(self, *args, **kwargs):
         if not self.pk:  # New instance
             self.annual_premium, self.interval_payment = self.calculate_premium()
@@ -1428,6 +1600,14 @@ class PremiumPayment(models.Model):
     
         # Handle new payment if paid_amount is provided
         if self.paid_amount > 0:
+            # Calculate taxes
+            self.calculate_taxes()
+            
+            # Generate receipt number if not provided
+            if not self.receipt_number:
+                timestamp = timezone.now().strftime('%Y%m%d%H%M%S')
+                self.receipt_number = f"RCP-{self.policy_holder.policy_number}-{timestamp}"
+                
             # First add to total_paid
             self.total_paid += self.paid_amount
             self.paid_amount = Decimal('0.00')  # Reset paid_amount after adding to total_paid
@@ -1467,7 +1647,7 @@ class PremiumPayment(models.Model):
          # --- New GSV and SSV Calculations ---
         self.gsv_value = self.calculate_gsv()
         self.ssv_value = self.calculate_ssv()
-        
+            
         super().save(*args, **kwargs)
 
     def calculate_gsv(self):
@@ -1638,13 +1818,15 @@ class PremiumPayment(models.Model):
         
         # 3 years of non-payment leads to policy expiry (1095 days ≈ 3 years)
         if days_late > 1095:
-            # Update both premium payment and policy holder statuses
-            self.policy_holder.status = 'Expired'
-            self.policy_holder.save(update_fields=['status'])
-            self.payment_status = 'Expired'
-            # Don't call self.save() here to avoid recursion
-            # Just return True to indicate expiry
             logger.info(f"Policy {self.policy_holder.id} has expired due to {days_late} days of non-payment")
+            
+            # Instead of just marking as expired, trigger automatic surrender
+            surrender_reason = f"Automatic surrender due to non-payment for {days_late} days (over 3 years)"
+            self.policy_holder.surrender_policy('Automatic', surrender_reason)
+            
+            # Update payment status
+            self.payment_status = 'Expired'
+            
             return True
         
         return False
@@ -1700,6 +1882,15 @@ class Loan(models.Model):
         """
         Calculate maximum loan amount and validate requested amount if provided.
         """
+        # Check if policy is surrendered
+        if self.policy_holder.status == 'Surrendered':
+            return {
+                'is_valid': False,
+                'message': 'Cannot create loan for a surrendered policy',
+                'max_allowed': Decimal('0'),
+                'gsv_value': Decimal('0')
+            }
+        
         try:
             premium_payment = self.policy_holder.premium_payments.first()
             if not premium_payment:
@@ -1812,10 +2003,14 @@ class LoanRepayment(models.Model):
 
     def process_repayment(self):
         """Apply repayment to interest and/or principal."""
+        # Check if policy is surrendered
+        if self.loan.policy_holder.status == 'Surrendered':
+            raise ValidationError("Cannot process repayments for a surrendered policy.")
+        
         # If this record already has a remaining_loan_balance, it's already been processed
         if self.pk and self.remaining_loan_balance > 0:
             return
-            
+        
         remaining = self.amount
 
         if self.repayment_type in ('Both', 'Interest'):
@@ -1933,3 +2128,389 @@ class Commission(models.Model):
         verbose_name = "Commission"
         verbose_name_plural = "Commissions"
         ordering = ['-date']
+
+# Policy Surrender Process
+class PolicySurrender(models.Model):
+    """Model to handle policy surrender requests and processing."""
+    policy_holder = models.ForeignKey(
+        PolicyHolder,
+        on_delete=models.CASCADE,
+        related_name='surrender_requests'
+    )
+    request_date = models.DateField(
+        auto_now_add=True,
+        help_text="Date when surrender was requested"
+    )
+    surrender_type = models.CharField(
+        max_length=20,
+        choices=[
+            ('Voluntary', 'Voluntary Surrender'),
+            ('Automatic', 'Automatic Surrender'),
+            ('Maturity', 'Maturity Surrender')
+        ],
+        default='Voluntary',
+        help_text="Type of surrender request"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ('Pending', 'Pending'),
+            ('Approved', 'Approved'),
+            ('Rejected', 'Rejected'),
+            ('Processed', 'Processed')
+        ],
+        default='Pending'
+    )
+    gsv_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0.00,
+        help_text="Guaranteed Surrender Value at time of request"
+    )
+    ssv_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0.00,
+        help_text="Special Surrender Value at time of request"
+    )
+    surrender_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0.00,
+        help_text="Final surrender amount to be paid"
+    )
+    outstanding_loans = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0.00,
+        help_text="Outstanding loan amount to be deducted"
+    )
+    processing_fee = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0.00,
+        help_text="Fee charged for processing surrender"
+    )
+    tax_deduction = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0.00,
+        help_text="Tax deducted on surrender amount (TDS)"
+    )
+    approved_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='approved_surrenders'
+    )
+    approval_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Date when surrender was approved"
+    )
+    payment_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Date when surrender amount was paid"
+    )
+    payment_method = models.CharField(
+        max_length=50,
+        choices=[
+            ('Bank Transfer', 'Bank Transfer'),
+            ('Check', 'Check'),
+            ('Cash', 'Cash')
+        ],
+        null=True,
+        blank=True
+    )
+    surrender_reason = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Reason for surrender request"
+    )
+    notes = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Additional notes about surrender process"
+    )
+    
+    def calculate_surrender_values(self):
+        """Calculate surrender values (GSV and SSV)."""
+        try:
+            premium_payment = self.policy_holder.premium_payments.first()
+            if not premium_payment:
+                return
+                
+            # Get GSV and SSV values from premium payment
+            self.gsv_amount = premium_payment.gsv_value
+            self.ssv_amount = premium_payment.ssv_value
+            
+            # Get outstanding loans
+            outstanding_loans = self.policy_holder.loans.filter(
+                loan_status='Active'
+            ).aggregate(
+                total=Sum('remaining_balance') + Sum('accrued_interest')
+            )['total'] or Decimal('0.00')
+            
+            self.outstanding_loans = outstanding_loans
+            
+            # Calculate processing fee (typically 1-2% in Nepal)
+            processing_fee_rate = Decimal('0.01')  # 1%
+            max_surrender = max(self.gsv_amount, self.ssv_amount)
+            self.processing_fee = (max_surrender * processing_fee_rate).quantize(Decimal('1.00'))
+            
+            # Calculate TDS (tax) - typically 15% on the surrender profit in Nepal
+            # If policy surrendered after 5 years, tax is usually exempted
+            policy_duration = (date.today() - self.policy_holder.start_date).days // 365
+            
+            if policy_duration < 5 and max_surrender > 0:
+                # Calculate taxable amount (surrender value minus total premiums paid)
+                premium_payment = self.policy_holder.premium_payments.first()
+                total_premiums = premium_payment.total_paid if premium_payment else Decimal('0.00')
+                taxable_amount = max(max_surrender - total_premiums, Decimal('0.00'))
+                
+                # Apply TDS rate (15% in Nepal)
+                tds_rate = Decimal('0.15')
+                self.tax_deduction = (taxable_amount * tds_rate).quantize(Decimal('1.00'))
+            else:
+                self.tax_deduction = Decimal('0.00')
+            
+            # Calculate final surrender amount
+            self.surrender_amount = max(
+                max_surrender - self.outstanding_loans - self.processing_fee - self.tax_deduction,
+                Decimal('0.00')
+            )
+            
+            return {
+                'gsv': self.gsv_amount,
+                'ssv': self.ssv_amount,
+                'surrender_amount': self.surrender_amount,
+                'outstanding_loans': self.outstanding_loans,
+                'processing_fee': self.processing_fee,
+                'tax_deduction': self.tax_deduction
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculating surrender values: {str(e)}")
+            raise ValidationError(f"Error calculating surrender values: {str(e)}")
+    
+    def approve_surrender(self, user):
+        """Approve surrender request and calculate final values."""
+        if self.status == 'Approved':
+            raise ValidationError("This surrender is already approved.")
+        
+        if self.status != 'Pending' and self.status != 'Processed':
+            raise ValidationError("Cannot approve a surrender that is not in pending or processed status")
+        
+        self.calculate_surrender_values()
+        self.approved_by = user
+        self.approval_date = date.today()
+        self.status = 'Approved'
+        self.save()
+        
+        # Update policy holder status
+        self.policy_holder.status = 'Surrendered'
+        self.policy_holder.save(update_fields=['status'])
+        
+        return True
+    
+    def process_payment(self, payment_method):
+        """Process surrender payment."""
+        if self.status != 'Approved':
+            raise ValidationError("Cannot process payment for a surrender that is not approved")
+        
+        self.payment_method = payment_method
+        self.payment_date = date.today()
+        self.status = 'Processed'
+        self.save()
+        
+        # Ensure policy holder status is set to Surrendered
+        if self.policy_holder.status != 'Surrendered':
+            self.policy_holder.status = 'Surrendered'
+            self.policy_holder.save(update_fields=['status'])
+        
+        return True
+    
+    def save(self, *args, **kwargs):
+        # For new surrender requests, calculate surrender values
+        if not self.pk:
+            self.calculate_surrender_values()
+        
+        # For automatic surrenders, auto-approve only if status is Pending
+        if not self.pk and self.surrender_type == 'Automatic' and self.status == 'Pending':
+            self.status = 'Approved'
+            self.approval_date = date.today()
+        
+        super().save(*args, **kwargs)
+    
+    def __str__(self):
+        return f"Surrender: {self.policy_holder} - {self.status} ({self.surrender_amount})"
+    
+    class Meta:
+        verbose_name = "Policy Surrender"
+        verbose_name_plural = "Policy Surrenders"
+        ordering = ['-request_date']
+        indexes = [
+            models.Index(fields=['policy_holder']),
+            models.Index(fields=['status']),
+        ]
+
+class PolicyRenewal(models.Model):
+    """Model to track policy renewals and send notifications."""
+    RENEWAL_STATUS_CHOICES = [
+        ('Pending', 'Pending'),
+        ('Renewed', 'Renewed'),
+        ('Expired', 'Expired'),
+    ]
+    
+    policy_holder = models.ForeignKey(
+        'PolicyHolder', 
+        on_delete=models.CASCADE, 
+        related_name='renewals'
+    )
+    due_date = models.DateField(
+        help_text="Date when policy renewal is due"
+    )
+    renewal_amount = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2,
+        help_text="Amount needed for renewal"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=RENEWAL_STATUS_CHOICES,
+        default='Pending'
+    )
+    grace_period_end = models.DateField(
+        null=True, 
+        blank=True,
+        help_text="End date of grace period for renewal"
+    )
+    renewal_date = models.DateField(
+        null=True, 
+        blank=True,
+        help_text="Date when the policy was renewed"
+    )
+    renewed_by = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        help_text="User who processed the renewal"
+    )
+    notes = models.TextField(
+        blank=True, 
+        null=True,
+        help_text="Additional notes about this renewal"
+    )
+    
+    # Reminder tracking fields
+    first_reminder_date = models.DateField(
+        null=True, 
+        blank=True,
+        help_text="Date when first reminder was sent"
+    )
+    is_first_reminder_sent = models.BooleanField(
+        default=False,
+        help_text="Indicates if first reminder has been sent"
+    )
+    
+    second_reminder_date = models.DateField(
+        null=True, 
+        blank=True,
+        help_text="Date when second reminder was sent"
+    )
+    is_second_reminder_sent = models.BooleanField(
+        default=False,
+        help_text="Indicates if second reminder has been sent"
+    )
+    
+    final_reminder_date = models.DateField(
+        null=True, 
+        blank=True,
+        help_text="Date when final reminder was sent"
+    )
+    is_final_reminder_sent = models.BooleanField(
+        default=False,
+        help_text="Indicates if final reminder has been sent"
+    )
+    
+    def __str__(self):
+        return f"Renewal for {self.policy_holder.policy_number} due on {self.due_date}"
+    
+    def save(self, *args, **kwargs):
+        # Calculate grace period end date (30 days after due date)
+        if not self.grace_period_end and self.due_date:
+            self.grace_period_end = self.due_date + timedelta(days=30)
+            
+        # Auto-expire if past grace period
+        if self.status == 'Pending' and self.grace_period_end and date.today() > self.grace_period_end:
+            self.status = 'Expired'
+            
+            # Update policy holder status if needed
+            if self.policy_holder.status == 'Active':
+                self.policy_holder.status = 'Expired'
+                self.policy_holder.save(update_fields=['status'])
+        
+        super().save(*args, **kwargs)
+    
+    def mark_as_renewed(self, user):
+        """Mark the policy as renewed."""
+        if self.status in ['Pending', 'Expired']:
+            self.status = 'Renewed'
+            self.renewal_date = date.today()
+            self.renewed_by = user
+            self.save()
+            
+            # Update policy holder record
+            self.policy_holder.start_date = date.today()
+            self.policy_holder.maturity_date = date.today().replace(
+                year=date.today().year + self.policy_holder.duration_years
+            )
+            self.policy_holder.status = 'Active'
+            self.policy_holder.save(update_fields=[
+                'start_date', 'maturity_date', 'status'
+            ])
+            
+            # Create a new premium payment record if needed
+            try:
+                premium_payment = self.policy_holder.premium_payments.first()
+                if premium_payment:
+                    premium_payment.calculate_premium()
+                    premium_payment.payment_status = 'Unpaid'
+                    premium_payment.save()
+            except Exception as e:
+                logger.error(f"Error updating premium payment for renewal: {str(e)}")
+            
+            return True
+        return False
+    
+    def check_expiry(self):
+        """Check if the renewal period has expired."""
+        today = date.today()
+        
+        if self.status == 'Pending' and self.grace_period_end and today > self.grace_period_end:
+            self.status = 'Expired'
+            self.save(update_fields=['status'])
+            
+            # Update policy holder status if needed
+            if self.policy_holder.status == 'Active':
+                self.policy_holder.status = 'Expired'
+                self.policy_holder.save(update_fields=['status'])
+                
+            return True
+        return False
+    
+    def __str__(self):
+        return f"Renewal for {self.policy_holder.policy_number} - Due: {self.due_date}"
+    
+    class Meta:
+        verbose_name = "Policy Renewal"
+        verbose_name_plural = "Policy Renewals"
+        ordering = ['due_date']
+        indexes = [
+            models.Index(fields=['policy_holder']),
+            models.Index(fields=['status']),
+            models.Index(fields=['due_date']),
+        ]

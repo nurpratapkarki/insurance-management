@@ -1,0 +1,376 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block extrastyle %}
+<style>
+    @media print {
+        body {
+            padding: 0;
+            margin: 0;
+            font-size: 12pt;
+        }
+        
+        button {
+            display: none;
+        }
+        
+        .print-container {
+            width: 100%;
+            padding: 1cm;
+            box-shadow: none;
+        }
+        
+        @page {
+            size: letter;
+            margin: 1cm;
+        }
+    }
+    
+    body {
+        background-color: #f8f9fa;
+        font-family: Arial, sans-serif;
+    }
+    
+    .print-container {
+        background-color: white;
+        width: 21cm;
+        min-height: 29.7cm;
+        margin: 1cm auto;
+        padding: 2cm;
+        box-shadow: 0 0 0.5cm rgba(0,0,0,0.1);
+    }
+    
+    .print-header {
+        text-align: center;
+        margin-bottom: 2cm;
+    }
+    
+    .print-header img {
+        max-height: 2cm;
+        margin-bottom: 0.5cm;
+    }
+    
+    .print-header h1 {
+        font-size: 24pt;
+        margin: 0;
+        color: #2c3e50;
+    }
+    
+    .print-header h2 {
+        font-size: 14pt;
+        margin: 0.5cm 0 0 0;
+        color: #7f8c8d;
+    }
+    
+    .surrender-info {
+        margin-bottom: 1.5cm;
+    }
+    
+    .surrender-info h3 {
+        font-size: 16pt;
+        border-bottom: 1px solid #eee;
+        padding-bottom: 0.2cm;
+        margin-bottom: 0.5cm;
+        color: #2c3e50;
+    }
+    
+    .info-item {
+        margin-bottom: 0.3cm;
+        display: flex;
+    }
+    
+    .info-label {
+        font-weight: bold;
+        width: 40%;
+    }
+    
+    .info-value {
+        width: 60%;
+    }
+    
+    .surrender-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 1cm 0;
+    }
+    
+    .surrender-table th, 
+    .surrender-table td {
+        padding: 0.3cm;
+        border: 1px solid #ddd;
+    }
+    
+    .surrender-table th {
+        background-color: #f2f2f2;
+        text-align: left;
+    }
+    
+    .surrender-table tr:nth-child(even) {
+        background-color: #f9f9f9;
+    }
+    
+    .surrender-total {
+        font-weight: bold;
+    }
+    
+    .policy-details {
+        margin-bottom: 1.5cm;
+    }
+    
+    .surrender-calculation {
+        margin-bottom: 1.5cm;
+    }
+    
+    .surrender-declaration {
+        margin-bottom: 1.5cm;
+        font-style: italic;
+        line-height: 1.5;
+    }
+    
+    .surrender-footer {
+        margin-top: 2cm;
+        text-align: center;
+        font-size: 10pt;
+        color: #7f8c8d;
+    }
+    
+    .surrender-signatures {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 2cm;
+    }
+    
+    .signature-block {
+        text-align: center;
+        width: 45%;
+    }
+    
+    .signature-line {
+        border-top: 1px solid #000;
+        margin: 2cm 0 0.2cm 0;
+    }
+    
+    .print-button {
+        background-color: #2980b9;
+        color: white;
+        border: none;
+        padding: 15px 25px;
+        font-size: 16px;
+        cursor: pointer;
+        margin: 20px auto;
+        display: block;
+        border-radius: 5px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        transition: background-color 0.3s;
+        font-weight: bold;
+    }
+    
+    .print-button:hover {
+        background-color: #3498db;
+    }
+    
+    .print-button-container {
+        text-align: center;
+        margin: 20px 0;
+        padding: 10px;
+        background-color: #f5f5f5;
+        border-radius: 5px;
+    }
+    
+    .status-badge {
+        display: inline-block;
+        padding: 5px 10px;
+        border-radius: 3px;
+        font-weight: bold;
+        color: white;
+    }
+    
+    .status-approved {
+        background-color: #2ecc71;
+    }
+    
+    .status-processed {
+        background-color: #3498db;
+    }
+</style>
+<script>
+    // Automatically trigger print dialog after page loads
+    window.onload = function() {
+        // Small delay to ensure everything is loaded
+        setTimeout(function() {
+            window.print();
+        }, 500);
+    };
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="print-button-container">
+    <button class="print-button" onclick="window.print()">
+        <i class="fas fa-print" style="margin-right: 8px;"></i> {% trans "Print Certificate" %}
+    </button>
+</div>
+
+<div class="print-container">
+    <div class="print-header">
+        {% if company_logo %}
+            <img src="{{ company_logo.url }}" alt="{{ company_name }} Logo">
+        {% endif %}
+        <h1>{{ company_name }}</h1>
+        <h2>{% trans "Policy Surrender Certificate" %}</h2>
+        {% if company_address %}
+            <p>{{ company_address }}</p>
+        {% endif %}
+    </div>
+    
+    <div class="surrender-info">
+        <h3>{% trans "Surrender Information" %}</h3>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Certificate No:" %}</div>
+            <div class="info-value">SC-{{ surrender.id|stringformat:"06d" }}</div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Status:" %}</div>
+            <div class="info-value">
+                <span class="status-badge status-{% if surrender.status == 'Approved' %}approved{% elif surrender.status == 'Processed' %}processed{% endif %}">
+                    {{ surrender.get_status_display }}
+                </span>
+            </div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Request Date:" %}</div>
+            <div class="info-value">{{ surrender.request_date }}</div>
+        </div>
+        
+        {% if surrender.approval_date %}
+        <div class="info-item">
+            <div class="info-label">{% trans "Approval Date:" %}</div>
+            <div class="info-value">{{ surrender.approval_date }}</div>
+        </div>
+        {% endif %}
+        
+        {% if surrender.payment_date %}
+        <div class="info-item">
+            <div class="info-label">{% trans "Payment Date:" %}</div>
+            <div class="info-value">{{ surrender.payment_date }}</div>
+        </div>
+        {% endif %}
+        
+        {% if surrender.payment_method %}
+        <div class="info-item">
+            <div class="info-label">{% trans "Payment Method:" %}</div>
+            <div class="info-value">{{ surrender.payment_method }}</div>
+        </div>
+        {% endif %}
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Surrender Type:" %}</div>
+            <div class="info-value">{{ surrender.get_surrender_type_display }}</div>
+        </div>
+    </div>
+    
+    <div class="policy-details">
+        <h3>{% trans "Policy Details" %}</h3>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Policy Number:" %}</div>
+            <div class="info-value">{{ policy_holder.policy_number }}</div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Policy Holder:" %}</div>
+            <div class="info-value">{{ policy_holder.first_name }} {{ policy_holder.middle_name|default:"" }} {{ policy_holder.last_name }}</div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Policy Type:" %}</div>
+            <div class="info-value">{{ policy_holder.policy.name|default:"" }}</div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Sum Assured:" %}</div>
+            <div class="info-value">Rs. {{ policy_holder.sum_assured|floatformat:2 }}</div>
+        </div>
+        
+        <div class="info-item">
+            <div class="info-label">{% trans "Issue Date:" %}</div>
+            <div class="info-value">{{ policy_holder.start_date }}</div>
+        </div>
+        
+        {% if policy_holder.maturity_date %}
+        <div class="info-item">
+            <div class="info-label">{% trans "Maturity Date:" %}</div>
+            <div class="info-value">{{ policy_holder.maturity_date }}</div>
+        </div>
+        {% endif %}
+    </div>
+    
+    <div class="surrender-calculation">
+        <h3>{% trans "Surrender Calculation" %}</h3>
+        
+        <table class="surrender-table">
+              <tr>
+                  <td>Guaranteed Surrender Value (GSV)</td>
+                  <td>{{ surrender.gsv_amount|floatformat:2 }}</td>
+              </tr>
+              <tr>
+                  <td>Special Surrender Value (SSV)</td>
+                  <td>{{ surrender.ssv_amount|floatformat:2 }}</td>
+              </tr>
+              <tr>
+                  <td>Higher of GSV/SSV</td>
+                  <td>
+                      {% if surrender.gsv_amount > surrender.ssv_amount %}
+                          {{ surrender.gsv_amount|floatformat:2 }}
+                      {% else %}
+                          {{ surrender.ssv_amount|floatformat:2 }}
+                      {% endif %}
+                  </td>
+              </tr>
+              <tr>
+                  <td>Outstanding Loans</td>
+                  <td>- {{ surrender.outstanding_loans|floatformat:2 }}</td>
+              </tr>
+              <tr>
+                  <td>Processing Fee</td>
+                  <td>- {{ surrender.processing_fee|floatformat:2 }}</td>
+              </tr>
+              <tr>
+                  <td>Tax Deduction</td>
+                  <td>- {{ surrender.tax_deduction|floatformat:2 }}</td>
+              </tr>
+              <tr class="surrender-total">
+                  <td>Final Surrender Amount</td>
+                  <td>{{ surrender.surrender_amount|floatformat:2 }}</td>
+              </tr>
+        </table>
+    </div>
+    
+    <div class="surrender-declaration">
+        <h3>{% trans "Declaration" %}</h3>
+        <p>{% trans "I hereby declare that I have voluntarily surrendered my insurance policy. I understand that by surrendering this policy, I forfeit all future benefits and the insurance cover provided by the policy. I acknowledge that the surrender value calculated above is in accordance with the policy terms and conditions, and I accept this amount as full and final settlement." %}</p>
+    </div>
+    
+    <div class="surrender-signatures">
+        <div class="signature-block">
+            <div class="signature-line"></div>
+            <div>{% trans "Policy Holder's Signature" %}</div>
+        </div>
+        
+        <div class="signature-block">
+            <div class="signature-line"></div>
+            <div>{% trans "Authorized Signatory" %}</div>
+        </div>
+    </div>
+    
+    <div class="surrender-footer">
+        <p>{% trans "This is a computer-generated document. No signature is required." %}</p>
+        <p>{% trans "Certificate generated on" %} {{ surrender.approval_date|default:surrender.request_date }}</p>
+        <p>{% trans "Certificate ID:" %} SC-{{ surrender.id|stringformat:"06d" }}</p>
+        <p>&copy; {{ company_name }} {% now "Y" %}</p>
+    </div>
+</div>
+{% endblock %} 

@@ -27,7 +27,8 @@ from .models import (
     Company,
     UserProfile,
     Bonus,
-    Commission
+    Commission,
+    PolicySurrender
 )
 import random
 
@@ -518,3 +519,116 @@ def create_policyholder_user(sender, instance, created, **kwargs):
                 
         except Exception as e:
             logger.error(f"Error creating user for policy holder {instance.id}: {str(e)}")
+
+@receiver(post_save, sender=PolicySurrender)
+def handle_policy_surrender_status(sender, instance, created, **kwargs):
+    """
+    Signal handler to update policy holder status when a surrender is processed.
+    This ensures policy holder is marked as Surrendered whenever a PolicySurrender
+    instance is approved or processed.
+    """
+    try:
+        policy_holder = instance.policy_holder
+        
+        # If surrender is Approved or Processed, mark policy holder as Surrendered
+        if instance.status in ['Approved', 'Processed'] and policy_holder.status != 'Surrendered':
+            logger.info(f"Marking policy {policy_holder.policy_number} as Surrendered due to surrender status {instance.status}")
+            policy_holder.status = 'Surrendered'
+            policy_holder.save(update_fields=['status'])
+            
+    except Exception as e:
+        logger.error(f"Error handling policy surrender status change: {str(e)}")
+
+@receiver(pre_save, sender=PolicySurrender)
+def validate_surrender_operation(sender, instance, **kwargs):
+    """
+    Validation signal handler to prevent certain operations on surrendered policies.
+    """
+    if instance.pk:  # Only check for existing surrenders being modified
+        try:
+            original = PolicySurrender.objects.get(pk=instance.pk)
+            
+            # If original status was already Processed, prevent changes to different statuses
+            if original.status == 'Processed' and instance.status not in ['Processed', 'Approved']:
+                raise ValidationError(f"Cannot change surrender from Processed to {instance.status}. Processed surrenders are final.")
+                
+        except PolicySurrender.DoesNotExist:
+            # This shouldn't happen but just in case
+            pass
+
+@receiver(pre_save, sender=PremiumPayment)
+def validate_premium_payment_on_surrendered(sender, instance, **kwargs):
+    """
+    Signal handler to prevent premium payments for surrendered policies.
+    """
+    # Skip validation for new records being created with default values
+    if not instance.pk and instance.paid_amount == 0:
+        return
+
+    # Check if policy is surrendered
+    if instance.policy_holder.status == 'Surrendered':
+        if instance.paid_amount > 0:  # Only raise error if actual payment is being made
+            raise ValidationError("Cannot add payment to a surrendered policy.")
+
+@receiver(pre_save, sender=Loan)
+def validate_loan_on_surrendered(sender, instance, **kwargs):
+    """
+    Signal handler to prevent loan creation or modifications for surrendered policies.
+    """
+    # Allow loan balance reductions (repayments) but prevent new loans or increases
+    if instance.policy_holder.status == 'Surrendered':
+        if not instance.pk:  # New loan
+            raise ValidationError("Cannot create a new loan for a surrendered policy.")
+        
+        # Get original loan to check if loan amount is increasing
+        try:
+            original = sender.objects.get(pk=instance.pk)
+            if instance.loan_amount > original.loan_amount:
+                raise ValidationError("Cannot increase loan amount for a surrendered policy.")
+        except sender.DoesNotExist:
+            # If we can't find the original, better to be safe and block the operation
+            raise ValidationError("Cannot modify loan for a surrendered policy.")
+
+@receiver(pre_save, sender=LoanRepayment)
+def validate_loan_repayment_on_surrendered(sender, instance, **kwargs):
+    """
+    Signal handler to prevent loan repayments for surrendered policies.
+    """
+    if instance.loan.policy_holder.status == 'Surrendered':
+        raise ValidationError("Cannot process repayments for a surrendered policy.")
+
+@receiver(pre_save, sender='app.PolicyRenewal')
+def validate_policy_renewal_on_surrendered(sender, instance, **kwargs):
+    """
+    Signal handler to prevent renewal of surrendered policies.
+    """
+    if instance.policy_holder.status == 'Surrendered':
+        if instance.status == 'Renewed':
+            raise ValidationError("Cannot renew a policy that has been surrendered.")
+
+@receiver(post_save, sender=PolicySurrender)
+def update_policy_access_on_surrender(sender, instance, **kwargs):
+    """
+    Signal handler to update various related models when a policy is surrendered.
+    This ensures all related operations stop when a policy is surrendered.
+    """
+    if instance.status in ['Approved', 'Processed']:
+        policy_holder = instance.policy_holder
+        
+        try:
+            # Make sure the policy holder status is updated to surrendered
+            if policy_holder.status != 'Surrendered':
+                policy_holder.status = 'Surrendered'
+                policy_holder.save(update_fields=['status'])
+                
+            # Cancel any pending policy renewals
+            policy_holder.renewals.filter(status='Pending').update(status='Expired')
+            
+            # Mark all loans as requiring attention
+            for loan in policy_holder.loans.filter(loan_status='Active'):
+                loan.last_updated_at = timezone.now()
+                loan.save(update_fields=['last_updated_at'])
+                
+            logger.info(f"Policy holder {policy_holder.id} marked as surrendered and all related operations restricted")
+        except Exception as e:
+            logger.error(f"Error updating policy access on surrender: {str(e)}")

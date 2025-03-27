@@ -36,6 +36,7 @@ STATUS_CHOICES = [
     ('Pending', 'Pending'),
     ('Under Review', 'Under Review'),
     ('Approved', 'Approved'),
+    ('Surrendered', 'Surrendered'),
     ('Active', 'Active'),
     ('Rejected', 'Rejected'),
     ('Cancelled', 'Cancelled'),

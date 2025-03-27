@@ -286,8 +286,10 @@
                 <tr>
                     <th>Policy #</th>
                     <th>Policyholder</th>
-                    <th>Amount</th>
+                    <th>Amount Paid</th>
+                    <th>Payment Status</th>
                     <th>Payment Date</th>
+                    <th>Next Due Date</th>
                 </tr>
             </thead>
             <tbody>
@@ -295,7 +297,9 @@
                 <tr>
                     <td>{{ payment.policy_holder.policy_number }}</td>
                     <td>{{ payment.policy_holder.first_name }} {{ payment.policy_holder.last_name }}</td>
-                    <td>Rs. {{ payment.paid_amount|floatformat:0 }}</td>
+                    <td>Rs. {{ payment.paid_amount|floatformat:2 }}</td>
+                    <td>{{ payment.payment_status }}</td>
+                    <td>{% now "M d, Y" %}</td>
                     <td>{{ payment.next_payment_date|date:"M d, Y" }}</td>
                 </tr>
                 {% endfor %}

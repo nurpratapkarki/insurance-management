@@ -201,31 +201,43 @@
         <h3 class="section-title">Loan Details</h3>
         <div class="detail-row">
             <span class="detail-label">Loan Amount:</span>
-            <span class="detail-value">Rs. {{ loan.loan_amount }}</span>
+            <span class="detail-value">Rs. {{ loan.loan_amount|floatformat:2 }}</span>
         </div>
         <div class="detail-row">
             <span class="detail-label">Interest Rate:</span>
-            <span class="detail-value">{{ loan.interest_rate }}%</span>
+            <span class="detail-value">{{ loan.interest_rate|floatformat:2 }}%</span>
         </div>
         <div class="detail-row">
             <span class="detail-label">Remaining Balance:</span>
-            <span class="detail-value">Rs. {{ loan.remaining_balance }}</span>
+            <span class="detail-value">Rs. {{ loan.remaining_balance|floatformat:2 }}</span>
         </div>
         <div class="detail-row">
             <span class="detail-label">Accrued Interest:</span>
-            <span class="detail-value">Rs. {{ loan.accrued_interest }}</span>
+            <span class="detail-value">Rs. {{ loan.accrued_interest|floatformat:2 }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Total Outstanding:</span>
+            <span class="detail-value">Rs. {{ loan.remaining_balance|add:loan.accrued_interest|floatformat:2 }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Loan Term:</span>
+            <span class="detail-value">Based on policy maturity ({{ loan.policy_holder.maturity_date|date:"M d, Y" }})</span>
         </div>
         <div class="detail-row">
             <span class="detail-label">Last Interest Date:</span>
-            <span class="detail-value">{{ loan.last_interest_date }}</span>
+            <span class="detail-value">{{ loan.last_interest_date|date:"M d, Y" }}</span>
         </div>
         <div class="detail-row">
             <span class="detail-label">Created Date:</span>
-            <span class="detail-value">{{ loan.created_at }}</span>
+            <span class="detail-value">{{ loan.created_at|date:"M d, Y" }}</span>
         </div>
         <div class="detail-row">
             <span class="detail-label">Status:</span>
             <span class="detail-value">{{ loan.loan_status }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Loan ID:</span>
+            <span class="detail-value">L-{{ loan.id|stringformat:"06d" }}</span>
         </div>
     </div>
 

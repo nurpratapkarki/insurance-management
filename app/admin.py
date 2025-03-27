@@ -5,9 +5,9 @@ from django.db import models
 from django import forms
 from django.http import HttpResponseRedirect
 from django.urls import path
-from django.shortcuts import render, redirect
+from django.shortcuts import render, redirect, get_object_or_404
 from django.core.exceptions import ValidationError
-from django.utils.html import format_html
+from django.utils.html import format_html, mark_safe
 from django.template.loader import render_to_string
 from django.utils.safestring import mark_safe
 from django.db.models.signals import post_save
@@ -17,18 +17,32 @@ from django.urls import reverse
 from django.utils.html import format_html
 from django.contrib import messages
 from django.contrib.admin import site
-from django.db.models import Sum
+from django.db.models import Sum, Count, Avg
 from .views import manage_mortality_rates  
 from .frontend_data import *
 from .models import (
     InsurancePolicy, SalesAgent, PolicyHolder, Underwriting,
     ClaimRequest, ClaimProcessing, PremiumPayment,MortalityRate,
-    EmployeePosition, Employee, PaymentProcessing, Branch, Company, AgentReport, AgentApplication, Occupation, DurationFactor, GSVRate, SSVConfig, Bonus, BonusRate, Loan, LoanRepayment,UserProfile, OTP, Commission
+    EmployeePosition, Employee, PaymentProcessing, Branch, Company, AgentReport, AgentApplication, Occupation, DurationFactor, GSVRate, SSVConfig, Bonus, BonusRate, Loan, LoanRepayment,UserProfile, OTP, Commission, PolicySurrender, PolicyRenewal
 )
 from decimal import Decimal
 import logging
 from django.utils.translation import gettext_lazy as _
-
+from django.template.response import TemplateResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.contrib.admin.models import LogEntry, ADDITION, CHANGE, DELETION
+from django.contrib.contenttypes.models import ContentType
+from django.db.models import F
+from django.utils import timezone, translation
+from django.http import HttpResponse, JsonResponse
+from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+import json
+import os
+import uuid
+from django.db.models import Sum, Q, Count, F, Value, FloatField
+from django.db.models.functions import Cast, Coalesce, Concat
+import csv
+import calendar
 
 # Mixin for filtering 'Branch' and 'user' fields
 class BranchFilterMixin:
@@ -48,8 +62,6 @@ class BranchFilterMixin:
             kwargs["queryset"] = Branch.objects.filter(id=branch.id) if branch else Branch.objects.none()
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
-
-
 #Register occupation
 
 @admin.register(Occupation)
@@ -66,42 +78,12 @@ class SSVConfigInline(admin.TabularInline):
     model = SSVConfig
     extra = 0
 
-    
 # Register Insurance Policy
 @admin.register(InsurancePolicy)
 class InsurancePolicyAdmin(admin.ModelAdmin):
     list_display = ('name', 'min_sum_assured', 'max_sum_assured')
     search_fields = ('name', 'policy_type')
     inlines = [GSVRateInline, SSVConfigInline]
-
-    def save_model(self, request, obj, form, change):
-        if obj.policy_type == "Term" and obj.base_multiplier != 1.0:
-            messages.error(request, "Base multiplier for Term insurance must be 1.0.")
-            return  # Skip saving
-
-        # Save the policy to ensure it has a primary key
-        super().save_model(request, obj, form, change)
-
-    def save_related(self, request, form, formsets, change):
-        """
-        Override save_related to ensure the policy is saved 
-        before saving related objects (GSVRate, SSVConfig).
-        """
-        # Save the main object (InsurancePolicy)
-        if not form.instance.pk:
-            form.instance.save()
-        super().save_related(request, form, formsets, change)
-
-    def response_add(self, request, obj, post_url_continue=None):
-        """
-        Customize the response to guide the user after adding the policy.
-        """
-        if "_continue" in request.POST:
-            messages.info(
-                request, 
-                "Insurance Policy saved! You can now add GSV and SSV rates."
-            )
-        return super().response_add(request, obj, post_url_continue)
 
 #Bonus Rate Admin
 @admin.register(BonusRate)
@@ -111,227 +93,14 @@ class BonusRateAdmin(admin.ModelAdmin):
     search_fields = ('year', 'policy_type')
     list_filter = ('year', 'policy_type')
 
-class AgentReportInline(admin.TabularInline):
-    model = AgentReport
-    extra = 0
-    can_delete = False
-    readonly_fields = ('report_date', 'policies_sold', 'total_premium', 'commission_earned', 'target_achievement')
-    verbose_name = "Agent Report"
-    verbose_name_plural = "Agent Reports"
-# Register Sales Agent
+# Register Duration Factor
+@admin.register(DurationFactor)
+class DurationFactorAdmin(admin.ModelAdmin):
+    list_display = ( 'policy_type', 'min_duration', 'max_duration', 'factor')
+    list_filter = ( 'policy_type', 'factor')
+    search_fields = ('company__name',)
 
-@admin.register(SalesAgent)
-class SalesAgentAdmin(BranchFilterMixin,admin.ModelAdmin):
-    list_display = ('id', 'agent_code', 'get_application_name', 'is_active', 'commission_rate', 'joining_date')
-    search_fields = ('agent_code', 'application__first_name', 'application__last_name')
-    list_filter = ('is_active',)
-    ordering = ('-joining_date',)
-    inlines = [AgentReportInline]
-    
-
-    def get_application_name(self, obj):
-        return f"{obj.application.first_name} {obj.application.last_name}" if obj.application else "N/A"
-    
-    get_application_name.short_description = 'Agent Name'
-    
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        if not request.user.is_superuser and hasattr(request.user, 'profile'):
-            return qs.filter(branch=request.user.profile.branch)
-        return qs
-    
-    def save_model(self, request, obj, form, change):
-        # Populate non-document fields from the related AgentApplication
-        if obj.application:
-            obj.agent_code = f"A-{obj.branch.id}-{str(obj.application.id).zfill(4)}"
-        super().save_model(request, obj, form, change)
-        
-#Bonus inline for the policyholder
-class BonusAdmin(admin.ModelAdmin):
-    list_display = ('id', 'policyholder', 'bonus_amount', 'bonus_date')
-    list_filter = ('bonus_date',)
-    search_fields = ('policyholder__first_name', 'policyholder__last_name')
-    
-class BonusInline(admin.TabularInline):
-    model = Bonus
-    extra = 0
-    readonly_fields = ( 'accrued_amount', 'start_date', 'last_updated', 'total_bonus_accrued')
-
-    def total_bonus_accrued(self, obj):
-        """Calculate the total bonus accrued for the policyholder."""
-        if obj:
-            total = Bonus.objects.filter(policy_holder=obj.policy_holder).aggregate(total=Sum('accrued_amount'))['total']
-            return total or Decimal('0.00')
-        return Decimal('0.00')
-
-    total_bonus_accrued.short_description = 'Total Bonus Accrued'  # Label for the column
-    
-    
-class UnderwritingInline(admin.StackedInline):
-    model = Underwriting
-    extra = 0
-    readonly_fields = ( 'risk_category', 'last_updated_by', 'last_updated_at')
-
-    
-@admin.register(PolicyHolder)
-class PolicyHolderAdmin(BranchFilterMixin, admin.ModelAdmin):
-    list_display = ('policy_number','first_name', 'last_name', 'status', 'policy', 'sum_assured', 
-                    'payment_interval', 'occupation', 'maturity_date', 'print_button')
-    search_fields = ('first_name', 'last_name','policy_number')
-    list_filter = ('status', 'policy', 'occupation')
-    inlines = [BonusInline, UnderwritingInline]
-    # change_form_template = 'policyholder/change_form.html'
-    
-    fieldsets = (
-        ("Personal Information", {
-            'fields': (
-                'first_name', 'middle_name', 'last_name', 'gender', 'date_of_birth',
-                'phone_number', 'emergency_contact_name', 'emergency_contact_number', 
-                'occupation', 'yearly_income', 'status', 'start_date'
-            )
-        }),
-        ("Document Details", {
-            'fields': (
-                'document_type', 'document_number', 'document_front', 'document_back',
-                'pp_photo', 'pan_number', 'pan_front', 'pan_back', 'assets_details'
-            )
-        }),
-        ("Address & Geographic Details", {
-            'fields': (
-                'province', 'district', 'municipality', 'ward', 'nearest_hospital', 
-                'natural_hazard_exposure'
-            )
-        }),
-        ("Policy Details", {
-            'fields': (
-                'branch', 'policy', 'policy_number', 'agent',
-                'sum_assured', 'duration_years', 'payment_interval', 'payment_status',
-                'include_adb', 'include_ptd','risk_category'
-            )
-        }),
-        ("Nominee Details", {
-            'fields': (
-                'nominee_name', 'nominee_relation', 'nominee_document_type',
-                'nominee_document_number', 'nominee_document_front',
-                'nominee_document_back', 'nominee_pp_photo'
-            )
-        }),
-        ("Habits & Health Details", {
-            'fields': (
-                'health_history', 'habits', 'dietary_habits', 'work_environment_risk',
-                'alcoholic', 'smoker', 'past_medical_report', 'recent_medical_reports'
-            )
-        }),
-    )
-    
-    def get_urls(self):
-        urls = super().get_urls()
-        custom_urls = [
-            path(
-                'print/<path:object_id>/',
-                self.admin_site.admin_view(self.print_policy),
-                name='print_policy',
-            ),
-        ]
-        return custom_urls + urls
-    
-    def print_policy(self, request, object_id):
-        try:
-            policyholder = self.get_object(request, object_id)
-            company_name = policyholder.branch.company.name if policyholder.branch and policyholder.branch.company else "Insurance Company"
-            
-            context = {
-                'title': f'Policy #{policyholder.policy_number}',
-                'original': policyholder,
-                'company_name': company_name,
-                'opts': self.model._meta,
-                'media': self.media,
-            }
-            
-            return render(request, 'policyholder/print.html', context)
-        except (PolicyHolder.DoesNotExist, ValidationError):
-            return redirect('admin:app_policyholder_changelist')
-
-    def print_button(self, obj):
-        return format_html(
-            '<a class="button btn btn-info btn-sm" href="{}" onclick="window.open(this.href, \'_blank\', \'width=800,height=600\').print(); return false;">Print</a>',
-            reverse('admin:print_policy', args=[obj.pk])
-        )
-    print_button.short_description = 'Print'
-
-    def get_queryset(self, request):
-        """Limit PolicyHolder queryset to user's branch."""
-        qs = super().get_queryset(request)
-        if request.user.is_superuser:
-            return qs
-        branch = getattr(request.user.profile, 'branch', None)
-        return qs.filter(branch=branch) if branch else qs.none()
-
-
-def formfield_for_foreignkey(self, db_field, request, **kwargs):
-    if not request.user.is_superuser:
-        if db_field.name == "policy":
-            user_company = getattr(request.user.profile.branch, 'company', None)
-            if user_company:
-                kwargs["queryset"] = InsurancePolicy.objects.filter(
-                    branch__company=user_company
-                )
-            else:
-                kwargs["queryset"] = InsurancePolicy.objects.none()
-        elif db_field.name == "branch":
-            user_branch = getattr(request.user.profile, 'branch', None)
-            if user_branch:
-                kwargs["queryset"] = Branch.objects.filter(id=user_branch.id)
-            else:
-                kwargs["queryset"] = Branch.objects.none()
-    return super().formfield_for_foreignkey(db_field, request, **kwargs)
-
-
-    def save_model(self, request, obj, form, change):
-        """Save model with additional validation and branch assignment"""
-        try:
-            # Set branch if not set
-            if not obj.branch and hasattr(request.user, 'profile'):
-                obj.branch = request.user.profile.branch
-
-            # Validate required fields
-            if not change:  # Only for new policy holders
-                if not obj.sum_assured:
-                    form.add_error('sum_assured', 'Sum assured is required.')
-                    return
-                if not obj.policy:
-                    form.add_error('policy', 'Insurance policy is required.')
-                    return
-
-            obj.save()
-            
-        except ValidationError as e:
-            form._errors.update(e.message_dict)
-            messages.error(request, "Validation error occurred while saving the PolicyHolder.")
-            
-    def has_module_permission(self, request):
-        """Check if user has permission to access the module"""
-        if request.user.is_superuser:
-            return True
-        return hasattr(request.user, 'profile') and request.user.profile.branch is not None
-
-    def has_add_permission(self, request):
-        """Check if user has permission to add policy holders"""
-        return self.has_module_permission(request)
-
-    def has_change_permission(self, request, obj=None):
-        """Check if user has permission to change policy holders"""
-        if not self.has_module_permission(request):
-            return False
-        if obj and not request.user.is_superuser:
-            return obj.branch == request.user.profile.branch
-        return True
-
-    def has_delete_permission(self, request, obj=None):
-        """Check if user has permission to delete policy holders"""
-        return self.has_change_permission(request, obj)
 # Register Underwriting
-
 
 # Register Claim Request
 @admin.register(ClaimRequest)
@@ -375,12 +144,6 @@ class ClaimRequestAdmin(admin.ModelAdmin, BranchFilterMixin):
         )
     print_button.short_description = 'Print'
 
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        if request.user.is_superuser:
-            return qs
-
-
 # Register Claim Processing
 @admin.register(ClaimProcessing)
 class ClaimProcessingAdmin(admin.ModelAdmin, BranchFilterMixin):
@@ -408,15 +171,6 @@ class PremiumPaymentForm(forms.ModelForm):
             )
             self.fields['policy_holder'].to_field_name = 'policy_number'  # Use policy_number as the value
 
-
-# Register Duration Factor
-@admin.register(DurationFactor)
-class DurationFactorAdmin(admin.ModelAdmin):
-    list_display = ( 'policy_type', 'min_duration', 'max_duration', 'factor')
-    list_filter = ( 'policy_type', 'factor')
-    search_fields = ('company__name',)
-
-    
 # Register Premium Payment
 
 @admin.register(PremiumPayment)
@@ -581,17 +335,12 @@ class PremiumPaymentAdmin(admin.ModelAdmin):
                 messages.SUCCESS
             )
 
-
-            
-
-
 # Register Employee Position
 @admin.register(EmployeePosition)
 class EmployeePositionAdmin(admin.ModelAdmin):
     list_display = ('id', 'position')
     search_fields = ('position',)
     ordering = ('position',)
-
 
 # Register Employee
 @admin.register(Employee)
@@ -606,7 +355,6 @@ class EmployeeAdmin(BranchFilterMixin, admin.ModelAdmin):
         if not request.user.is_superuser and hasattr(request.user, 'profile'):
             return qs.filter(branch=request.user.profile.branch)
         return qs
-
 
 # Register Payment Processing
 @admin.register(PaymentProcessing)
@@ -1114,4 +862,314 @@ class CommissionAdmin(admin.ModelAdmin):
             return qs.filter(agent__branch=request.user.profile.branch)
         return qs
     
+class PolicySurrenderAdmin(admin.ModelAdmin):
+    list_display = ['policy_holder', 'request_date', 'surrender_type', 'status', 
+                  'surrender_amount', 'gsv_amount', 'ssv_amount', 'payment_date', 'print_button']
+    list_filter = ['status', 'surrender_type', 'request_date']
+    search_fields = ['policy_holder__first_name', 'policy_holder__last_name', 'policy_holder__policy_number']
+    readonly_fields = ['request_date', 'gsv_amount', 'ssv_amount', 'outstanding_loans', 
+                     'processing_fee', 'tax_deduction', 'surrender_amount', 'approved_by']
+    fieldsets = (
+        ('Policy Information', {
+            'fields': ('policy_holder', 'surrender_type', 'status', 'surrender_reason')
+        }),
+        ('Surrender Values', {
+            'fields': ('gsv_amount', 'ssv_amount', 'outstanding_loans', 
+                    'processing_fee', 'tax_deduction', 'surrender_amount')
+        }),
+        ('Approval & Payment', {
+            'fields': ('approved_by', 'approval_date', 'payment_date', 'payment_method', 'notes')
+        }),
+    )
+    
+    actions = ['approve_selected_surrenders', 'process_payment_for_selected']
+    
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                'print-surrender/<int:surrender_id>/',
+                self.admin_site.admin_view(self.print_surrender_certificate),
+                name='print-surrender-certificate',
+            ),
+        ]
+        return custom_urls + urls
+    
+    def print_surrender_certificate(self, request, surrender_id):
+        """View to print surrender certificate"""
+        try:
+            surrender = PolicySurrender.objects.get(pk=surrender_id)
+            policy_holder = surrender.policy_holder
+            
+            # Get company info
+            company_name = policy_holder.branch.company.name if policy_holder.branch and policy_holder.branch.company else "Insurance Company"
+            company_logo = policy_holder.branch.company.logo if policy_holder.branch and policy_holder.branch.company else None
+            company_address = policy_holder.branch.company.address if policy_holder.branch and policy_holder.branch.company else None
+            
+            context = {
+                'title': 'Policy Surrender Certificate',
+                'surrender': surrender,
+                'policy_holder': policy_holder,
+                'company_name': company_name,
+                'company_logo': company_logo,
+                'company_address': company_address,
+            }
+            
+            return TemplateResponse(
+                request,
+                'surrender/print.html',
+                context,
+            )
+        except PolicySurrender.DoesNotExist:
+            messages.error(request, "Surrender record not found.")
+            return redirect('admin:app_policysurrender_changelist')
+    
+    def approve_selected_surrenders(self, request, queryset):
+        """Admin action to approve selected surrender requests"""
+        success_count = 0
+        failure_count = 0
+        errors = []
+        
+        for surrender in queryset.filter(status__in=['Pending', 'Processed']):
+            try:
+                surrender.approve_surrender(request.user)
+                success_count += 1
+            except Exception as e:
+                failure_count += 1
+                errors.append(f"{surrender.policy_holder}: {str(e)}")
+        
+        if success_count > 0:
+            self.message_user(request, f"Successfully approved {success_count} surrender requests.", level=messages.SUCCESS)
+        
+        if failure_count > 0:
+            error_message = f"Failed to approve {failure_count} surrender requests."
+            if len(errors) <= 3:  # Show detailed errors for a few failures
+                error_message += " Errors: " + "; ".join(errors)
+            self.message_user(request, error_message, level=messages.ERROR)
+        
+        if success_count == 0 and failure_count == 0:
+            self.message_user(request, "No surrenders were found to approve.", level=messages.WARNING)
+    
+    def process_payment_for_selected(self, request, queryset):
+        """Admin action to mark selected surrenders as paid"""
+        success_count = 0
+        failure_count = 0
+        errors = []
+        
+        for surrender in queryset.filter(status='Approved'):
+            try:
+                surrender.process_payment('Bank Transfer')
+                success_count += 1
+            except Exception as e:
+                failure_count += 1
+                errors.append(f"{surrender.policy_holder}: {str(e)}")
+        
+        if success_count > 0:
+            self.message_user(request, f"Successfully processed payment for {success_count} surrender requests.", level=messages.SUCCESS)
+        
+        if failure_count > 0:
+            error_message = f"Failed to process payment for {failure_count} surrender requests."
+            if len(errors) <= 3:  # Show detailed errors for a few failures
+                error_message += " Errors: " + "; ".join(errors)
+            self.message_user(request, error_message, level=messages.ERROR)
+        
+        if success_count == 0 and failure_count == 0:
+            self.message_user(request, "No surrenders were found to process payments.", level=messages.WARNING)
+        
+    process_payment_for_selected.short_description = "Process payment for selected surrenders"
+    
+    def print_button(self, obj):
+        """Generate print button for surrenders"""
+        if obj and obj.pk and obj.status in ['Approved', 'Processed']:
+            url = reverse('admin:print-surrender-certificate', args=[obj.pk])
+            return format_html(
+                '<a class="button" href="{}" target="_blank" style="background-color:#2980b9;color:white;padding:6px 12px;border-radius:4px;text-decoration:none;display:inline-block;font-weight:bold;text-align:center;">'
+                '<i class="fas fa-print" style="margin-right:5px;"></i> Print</a>',
+                url
+            )
+        return ""
+    print_button.short_description = ""
+    
+    def save_model(self, request, obj, form, change):
+        """Override save_model to handle approval"""
+        original_status = None
+        
+        # Get original status if this is an update
+        if change:
+            original = PolicySurrender.objects.get(pk=obj.pk)
+            original_status = original.status
+        
+        # If status changed to Approved, approve the surrender
+        if change and original_status != 'Approved' and obj.status == 'Approved':
+            try:
+                obj.approve_surrender(request.user)
+            except ValidationError as e:
+                messages.error(request, str(e))
+                # Reset status to original to prevent partially approved state
+                obj.status = original_status
+                # Don't call super().save_model since we don't want to save the invalid status
+                return
+        # If status changed to Processed, process payment
+        elif change and original_status == 'Approved' and obj.status == 'Processed':
+            try:
+                obj.process_payment(obj.payment_method or 'Bank Transfer')
+            except ValidationError as e:
+                messages.error(request, str(e))
+                obj.status = original_status
+                return
+        
+        # For all other cases or if approval/processing succeeded
+        super().save_model(request, obj, form, change)
+
+    approve_selected_surrenders.short_description = "Approve selected surrender requests"
+
+# Register models
+admin.site.register(PolicySurrender, PolicySurrenderAdmin)
+
+class PolicyRenewalAdmin(admin.ModelAdmin):
+    list_display = ['policy_holder', 'due_date', 'grace_period_end', 'renewal_amount', 'status', 'reminder_status', 'actions_column']
+    list_filter = ['status', 'due_date', 'is_first_reminder_sent', 'is_second_reminder_sent', 'is_final_reminder_sent']
+    search_fields = ['policy_holder__policy_number', 'policy_holder__first_name', 'policy_holder__last_name']
+    readonly_fields = ['is_first_reminder_sent', 'first_reminder_date', 'is_second_reminder_sent', 'second_reminder_date', 'is_final_reminder_sent', 'final_reminder_date']
+    autocomplete_fields = ['policy_holder']
+    ordering = ['-due_date']
+    
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                'renew/<int:renewal_id>/',
+                self.admin_site.admin_view(self.renew_policy),
+                name='renew-policy',
+            ),
+            path(
+                'send-reminder/<int:renewal_id>/<str:reminder_type>/',
+                self.admin_site.admin_view(self.send_reminder),
+                name='send-renewal-reminder',
+            ),
+        ]
+        return custom_urls + urls
+        
+    def reminder_status(self, obj):
+        """Display reminder status with badges."""
+        if obj.is_final_reminder_sent:
+            return format_html('<span style="background-color: #e74c3c; color: white; padding: 3px 6px; border-radius: 3px;">Final sent</span>')
+        elif obj.is_second_reminder_sent:
+            return format_html('<span style="background-color: #f39c12; color: white; padding: 3px 6px; border-radius: 3px;">Second sent</span>')
+        elif obj.is_first_reminder_sent:
+            return format_html('<span style="background-color: #3498db; color: white; padding: 3px 6px; border-radius: 3px;">First sent</span>')
+        else:
+            return format_html('<span style="background-color: #95a5a6; color: white; padding: 3px 6px; border-radius: 3px;">No reminders</span>')
+            
+    reminder_status.short_description = 'Reminders'
+    
+    def actions_column(self, obj):
+        """Display action buttons based on status."""
+        buttons = []
+        
+        # Complete renewal button
+        if obj.status == 'Pending':
+            buttons.append(f'<a class="button" href="{reverse("admin:renew-policy", args=[obj.pk])}" style="background-color: #2ecc71;">Complete Renewal</a>')
+            
+        # Reminder buttons
+        if obj.status == 'Pending':
+            if not obj.is_first_reminder_sent:
+                buttons.append(f'<a class="button" href="{reverse("admin:send-renewal-reminder", args=[obj.pk, "first"])}" style="background-color: #3498db;">Send First Reminder</a>')
+            elif not obj.is_second_reminder_sent:
+                buttons.append(f'<a class="button" href="{reverse("admin:send-renewal-reminder", args=[obj.pk, "second"])}" style="background-color: #f39c12;">Send Second Reminder</a>')
+            elif not obj.is_final_reminder_sent:
+                buttons.append(f'<a class="button" href="{reverse("admin:send-renewal-reminder", args=[obj.pk, "final"])}" style="background-color: #e74c3c;">Send Final Reminder</a>')
+                
+        return format_html('<div style="display: flex; gap: 5px;">{}</div>', mark_safe(''.join(buttons)))
+        
+    actions_column.short_description = 'Actions'
+    
+    def send_reminder(self, request, renewal_id, reminder_type):
+        """View to send renewal reminders to policy holders."""
+        renewal = self.get_object(request, renewal_id)
+        
+        if renewal is None:
+            messages.error(request, "Renewal not found.")
+            return redirect('admin:app_policyrenewal_changelist')
+            
+        if renewal.status != 'Pending':
+            messages.error(request, f"Cannot send reminder for {renewal.get_status_display()} renewal.")
+            return redirect('admin:app_policyrenewal_change', renewal_id)
+            
+        # Validate reminder type
+        valid_types = ['first', 'second', 'final']
+        if reminder_type not in valid_types:
+            messages.error(request, f"Invalid reminder type: {reminder_type}")
+            return redirect('admin:app_policyrenewal_change', renewal_id)
+            
+        # Check if current reminder type can be sent based on sequence
+        if reminder_type == 'second' and not renewal.is_first_reminder_sent:
+            messages.error(request, "Cannot send second reminder before sending first reminder.")
+            return redirect('admin:app_policyrenewal_change', renewal_id)
+            
+        if reminder_type == 'final' and not renewal.is_second_reminder_sent:
+            messages.error(request, "Cannot send final reminder before sending second reminder.")
+            return redirect('admin:app_policyrenewal_change', renewal_id)
+            
+        # Send the reminder
+        if renewal.send_reminder(reminder_type):
+            messages.success(request, f"Sent {reminder_type} reminder to {renewal.policy_holder.first_name} {renewal.policy_holder.last_name}.")
+        else:
+            messages.error(request, f"Failed to send {reminder_type} reminder.")
+            
+        return redirect('admin:app_policyrenewal_change', renewal_id)
+    
+    def renew_policy(self, request, renewal_id):
+        """View to renew a policy"""
+        renewal = self.get_object(request, renewal_id)
+        
+        if request.method == 'POST':
+            notes = request.POST.get('notes', '')
+            
+            if renewal.mark_as_renewed(request.user):
+                # Update notes
+                renewal.notes = notes
+                renewal.save(update_fields=['notes'])
+                
+                messages.success(request, f"Policy {renewal.policy_holder.policy_number} has been renewed successfully.")
+                return redirect('admin:app_policyrenewal_changelist')
+            else:
+                messages.error(request, f"Failed to renew policy {renewal.policy_holder.policy_number}.")
+        
+        # Get policy details for context
+        policy_holder = renewal.policy_holder
+        premium_payment = policy_holder.premium_payments.first()
+        
+        context = {
+            'title': f'Renew Policy: {policy_holder.policy_number}',
+            'renewal': renewal,
+            'policy_holder': policy_holder,
+            'premium_payment': premium_payment,
+            'opts': self.model._meta,
+        }
+        
+        return TemplateResponse(
+            request,
+            'admin/app/policyrenewal/renewal_form.html',
+            context,
+        )
+
+# Register models
+admin.site.register(PolicyRenewal, PolicyRenewalAdmin)
+
+# Register PolicyHolder
+
+@admin.register(PolicyHolder)
+class PolicyHolderAdmin(BranchFilterMixin, admin.ModelAdmin):
+    list_display = ('policy_number', 'first_name', 'last_name', 'status', 'policy', 'sum_assured', 'payment_interval')
+    search_fields = ('first_name', 'last_name', 'policy_number')
+    list_filter = ('status', 'policy', 'occupation')
+    
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs
+        branch = getattr(request.user.profile, 'branch', None)
+        return qs.filter(branch=branch) if branch else qs.none()
+
     

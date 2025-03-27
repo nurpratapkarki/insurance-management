@@ -8,7 +8,8 @@ class AppConfig(AppConfig):
     name = 'app'
     
     def ready(self):
-        import app.signals  # Import the signals
+        """Import signals when the app is ready to ensure they are connected."""
+        import app.signals  # noqa
         
         # Only run in actual server environment (not during migrations or other Django commands)
         import os

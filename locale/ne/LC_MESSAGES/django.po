@@ -1,0 +1,223 @@
+# Nepali translation file for insurance management system.
+# Copyright (C) 2023 Insurance Management
+# This file is distributed under the same license as the Insurance Management package.
+msgid ""
+msgstr ""
+"Project-Id-Version: Insurance Management 1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2023-09-01 12:00+0545\n"
+"PO-Revision-Date: 2023-09-01 12:00+0545\n"
+"Last-Translator: Insurance Management Team\n"
+"Language-Team: Nepali\n"
+"Language: ne\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+# General terms
+msgid "Cancel"
+msgstr "रद्द गर्नुहोस्"
+
+msgid "Save"
+msgstr "सुरक्षित गर्नुहोस्"
+
+msgid "Submit"
+msgstr "पेश गर्नुहोस्"
+
+msgid "Delete"
+msgstr "मेटाउनुहोस्"
+
+msgid "Edit"
+msgstr "सम्पादन गर्नुहोस्"
+
+msgid "View"
+msgstr "हेर्नुहोस्"
+
+msgid "Print"
+msgstr "मुद्रण गर्नुहोस्"
+
+msgid "Download"
+msgstr "डाउनलोड गर्नुहोस्"
+
+msgid "Upload"
+msgstr "अपलोड गर्नुहोस्"
+
+msgid "Notes"
+msgstr "टिप्पणीहरू"
+
+msgid "Status"
+msgstr "अवस्था"
+
+msgid "Date"
+msgstr "मिति"
+
+msgid "Amount"
+msgstr "रकम"
+
+msgid "Rs."
+msgstr "रू."
+
+# Policy terms
+msgid "Policy"
+msgstr "पोलिसी"
+
+msgid "Policy Renewal"
+msgstr "पोलिसी नवीकरण"
+
+msgid "Policy Details"
+msgstr "पोलिसी विवरण"
+
+msgid "Policy Number"
+msgstr "पोलिसी नम्बर"
+
+msgid "Policy Holder"
+msgstr "पोलिसी धारक"
+
+msgid "Policy Type"
+msgstr "पोलिसी प्रकार"
+
+msgid "Sum Assured"
+msgstr "बीमा अंक"
+
+msgid "Start Date"
+msgstr "सुरु मिति"
+
+msgid "Maturity Date"
+msgstr "परिपक्व मिति"
+
+msgid "Payment Interval"
+msgstr "भुक्तानी अन्तराल"
+
+msgid "Premium Amount"
+msgstr "प्रिमियम रकम"
+
+msgid "Due Date"
+msgstr "भुक्तानी मिति"
+
+msgid "Renewal Information"
+msgstr "नवीकरण जानकारी"
+
+msgid "Renewal Amount"
+msgstr "नवीकरण रकम"
+
+msgid "Grace Period"
+msgstr "ग्रेस अवधि"
+
+msgid "Grace Period Ends"
+msgstr "ग्रेस अवधि समाप्त"
+
+msgid "30 days after due date"
+msgstr "भुक्तानी मिति पछि ३० दिन"
+
+msgid "First Reminder"
+msgstr "पहिलो स्मरण"
+
+msgid "Second Reminder"
+msgstr "दोस्रो स्मरण"
+
+msgid "Final Reminder"
+msgstr "अन्तिम स्मरण"
+
+msgid "Send First Reminder"
+msgstr "पहिलो स्मरण पठाउनुहोस्"
+
+msgid "Send Second Reminder"
+msgstr "दोस्रो स्मरण पठाउनुहोस्"
+
+msgid "Send Final Reminder"
+msgstr "अन्तिम स्मरण पठाउनुहोस्"
+
+msgid "Initiate Renewal"
+msgstr "नवीकरण सुरु गर्नुहोस्"
+
+msgid "Complete Renewal"
+msgstr "नवीकरण पूरा गर्नुहोस्"
+
+msgid "Note"
+msgstr "नोट"
+
+msgid "This policy has an active renewal process. You can complete the renewal by clicking the button below."
+msgstr "यो पोलिसीको सक्रिय नवीकरण प्रक्रिया चालु छ। तपाईं तलको बटन क्लिक गरेर नवीकरण पूरा गर्न सक्नुहुन्छ।"
+
+msgid "By initiating this renewal, a renewal request will be created and tracked. You'll be able to send reminders and process the renewal."
+msgstr "यो नवीकरण सुरु गरेर, एक नवीकरण अनुरोध सिर्जना र ट्र्याक गरिनेछ। तपाईं स्मरणहरू पठाउन र नवीकरण प्रक्रिया गर्न सक्षम हुनुहुनेछ।"
+
+msgid "Important"
+msgstr "महत्वपूर्ण"
+
+msgid "Policy renewal should be completed within the grace period to maintain continuous coverage. Past-due renewals may require additional underwriting."
+msgstr "निरन्तर कभरेज कायम राख्न पोलिसी नवीकरण ग्रेस अवधिभित्र पूरा गर्नुपर्नेछ। बक्यौता नवीकरणहरूको लागि अतिरिक्त अण्डरराइटिङ आवश्यक पर्न सक्छ।"
+
+msgid "Add any notes about this renewal"
+msgstr "यस नवीकरणको बारेमा कुनै टिप्पणी थप्नुहोस्"
+
+# Agent Commission Dashboard
+msgid "Agent Code"
+msgstr "एजेन्ट कोड"
+
+msgid "Commission Rate"
+msgstr "कमिशन दर"
+
+msgid "Total Policies Sold"
+msgstr "कुल बिक्री भएका पोलिसीहरू"
+
+msgid "Total Premium Collected"
+msgstr "कुल संकलित प्रिमियम"
+
+msgid "Commission Earned (YTD)"
+msgstr "कमाएको कमिशन (YTD)"
+
+msgid "Target Achievement"
+msgstr "लक्ष्य प्राप्ति"
+
+msgid "Annual Target"
+msgstr "वार्षिक लक्ष्य"
+
+msgid "vs last month"
+msgstr "गत महिनाको तुलनामा"
+
+msgid "vs last year"
+msgstr "गत वर्षको तुलनामा"
+
+msgid "Performance Metrics"
+msgstr "प्रदर्शन मेट्रिक्स"
+
+msgid "Monthly Sales Target"
+msgstr "मासिक बिक्री लक्ष्य"
+
+msgid "Customer Retention"
+msgstr "ग्राहक रिटेन्शन"
+
+msgid "Renewal Rate"
+msgstr "नवीकरण दर"
+
+msgid "Average Policy Value"
+msgstr "औसत पोलिसी मूल्य"
+
+msgid "Monthly Commission Trend"
+msgstr "मासिक कमिशन प्रवृत्ति"
+
+msgid "Last 12 Months"
+msgstr "गत १२ महिना"
+
+msgid "Policies Sold by Type"
+msgstr "प्रकार अनुसार बिक्री भएका पोलिसीहरू"
+
+msgid "Current Year"
+msgstr "चालु वर्ष"
+
+msgid "Recent Commissions"
+msgstr "हालैका कमिशनहरू"
+
+msgid "Last 30 Days"
+msgstr "गत ३० दिन"
+
+msgid "No recent commissions found."
+msgstr "कुनै हालैका कमिशनहरू भेटिएन।"
+
+msgid "Commission Amount"
+msgstr "कमिशन रकम"
+
+msgid "Target"
+msgstr "लक्ष्य" 
