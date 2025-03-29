@@ -5,7 +5,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/version-1.0.0-yellow" alt="Version">
   <img src="https://img.shields.io/badge/Django-4.x-blue" alt="Django">
-  <img src="https://img.shields.io/badge/PostgreSQL-13+-green" alt="PostgreSQL">
+  <img src="https://img.shields.io/badge/mySQL-13+-green" alt="MySQL">
   <img src="https://img.shields.io/badge/license-MIT-red" alt="License">
 </p>
 
@@ -98,7 +98,7 @@ The system follows Django's MVT (Model-View-Template) architecture with:
 <details>
   <summary><b>Database</b></summary>
   <ul>
-    <li><b>PostgreSQL 13+</b> - Primary database</li>
+    <li><b>MySQL 13+</b> - Primary database</li>
     <li><b>Django ORM</b> - Object-relational mapping</li>
     <li><b>Database migrations</b> - Schema management</li>
     <li><b>Backup tools</b> - Data protection</li>
@@ -108,7 +108,6 @@ The system follows Django's MVT (Model-View-Template) architecture with:
 <details>
   <summary><b>Deployment</b></summary>
   <ul>
-    <li><b>Docker</b> - Containerization</li>
     <li><b>Nginx</b> - Web server</li>
     <li><b>Gunicorn</b> - WSGI server</li>
     <li><b>GitHub Actions</b> - CI/CD pipeline</li>
@@ -119,7 +118,7 @@ The system follows Django's MVT (Model-View-Template) architecture with:
 
 ### Prerequisites
 - Python 3.8+
-- PostgreSQL 13+
+- MySQL13+
 - Git
 
 ### Installation
