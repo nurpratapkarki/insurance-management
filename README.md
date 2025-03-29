@@ -63,7 +63,7 @@ The system follows Django's MVT (Model-View-Template) architecture with:
 
 - **Role-based access control** for different stakeholder types
 - **Customized Django admin** for insurance-specific operations
-- **PostgreSQL database** for robust data integrity
+- **MySQL database** for robust data integrity
 - **Responsive frontend** for both staff and policyholder access
 
 <details>
