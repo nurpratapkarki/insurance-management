@@ -1,26 +1,61 @@
-# 🇳🇵 Insurance Management System
+# <img src="https://img.shields.io/badge/🇳🇵-Nepal-e01e26" alt="Nepal Flag"> Insurance Management System
 
-A comprehensive solution for the Nepali insurance market
+<p align="center">A comprehensive solution for the Nepali insurance market</p>
 
-![Version](https://img.shields.io/badge/version-1.0.0-yellow)
-![Django](https://img.shields.io/badge/Django-4.x-blue)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-13+-green)
-![License](https://img.shields.io/badge/license-MIT-red)
+<p align="center">
+  <img src="https://img.shields.io/badge/version-1.0.0-yellow" alt="Version">
+  <img src="https://img.shields.io/badge/Django-4.x-blue" alt="Django">
+  <img src="https://img.shields.io/badge/PostgreSQL-13+-green" alt="PostgreSQL">
+  <img src="https://img.shields.io/badge/license-MIT-red" alt="License">
+</p>
 
 ## 📋 Overview
 
 The Insurance Management System is a robust, enterprise-grade application designed specifically for the Nepali insurance market. It streamlines the entire insurance lifecycle from policy creation to claims settlement, surrender processing, and regulatory compliance.
 
+<details>
+  <summary><b>👉 View System Screenshot</b></summary>
+  <p align="center">
+    <i>Dashboard preview image would go here</i>
+  </p>
+</details>
+
 ## ✨ Key Features
 
-- **📝 Policy Administration**: Create and manage diverse policy types with customizable parameters
-- **💰 Premium Management**: Automated calculation with Nepal-specific tax compliance
-- **⚠️ Claims Processing**: Complete workflow from submission to settlement
-- **👥 Agent Network**: Commission tracking, licensing, and performance analytics
-- **💸 Loan Management**: Policy loans with interest calculation
-- **📄 Surrender Processing**: GSV/SSV calculations with certificate generation
-- **⚖️ Regulatory Compliance**: Built-in features for Beema Samiti requirements
-- **📊 Comprehensive Reporting**: Business intelligence across all operations
+<table>
+  <tr>
+    <td><b>📝 Policy Administration</b></td>
+    <td>Create and manage diverse policy types with customizable parameters</td>
+  </tr>
+  <tr>
+    <td><b>💰 Premium Management</b></td>
+    <td>Automated calculation with Nepal-specific tax compliance</td>
+  </tr>
+  <tr>
+    <td><b>⚠️ Claims Processing</b></td>
+    <td>Complete workflow from submission to settlement</td>
+  </tr>
+  <tr>
+    <td><b>👥 Agent Network</b></td>
+    <td>Commission tracking, licensing, and performance analytics</td>
+  </tr>
+  <tr>
+    <td><b>💸 Loan Management</b></td>
+    <td>Policy loans with interest calculation</td>
+  </tr>
+  <tr>
+    <td><b>📄 Surrender Processing</b></td>
+    <td>GSV/SSV calculations with certificate generation</td>
+  </tr>
+  <tr>
+    <td><b>⚖️ Regulatory Compliance</b></td>
+    <td>Built-in features for Beema Samiti requirements</td>
+  </tr>
+  <tr>
+    <td><b>📊 Comprehensive Reporting</b></td>
+    <td>Business intelligence across all operations</td>
+  </tr>
+</table>
 
 ## 🏗️ Architecture
 
@@ -31,31 +66,54 @@ The system follows Django's MVT (Model-View-Template) architecture with:
 - **PostgreSQL database** for robust data integrity
 - **Responsive frontend** for both staff and policyholder access
 
+<details>
+  <summary><b>👉 View Architecture Diagram</b></summary>
+  <p align="center">
+    <i>Architecture diagram would go here</i>
+  </p>
+</details>
+
 ## 🛠️ Tech Stack
 
-### Backend
-- **Django 4.x** - Web framework
-- **Django REST Framework** - API development
-- **Celery** - Task scheduling
-- **Redis** - Caching and message broker
+<details open>
+  <summary><b>Backend</b></summary>
+  <ul>
+    <li><b>Django 4.x</b> - Web framework</li>
+    <li><b>Django REST Framework</b> - API development</li>
+    <li><b>Celery</b> - Task scheduling</li>
+    <li><b>Redis</b> - Caching and message broker</li>
+  </ul>
+</details>
 
-### Frontend
-- **HTML5/CSS3** - Structure and styling
-- **JavaScript/jQuery** - Interactive components
-- **Bootstrap** - Responsive design
-- **Chart.js** - Data visualization
+<details>
+  <summary><b>Frontend</b></summary>
+  <ul>
+    <li><b>HTML5/CSS3</b> - Structure and styling</li>
+    <li><b>JavaScript/jQuery</b> - Interactive components</li>
+    <li><b>Bootstrap</b> - Responsive design</li>
+    <li><b>Chart.js</b> - Data visualization</li>
+  </ul>
+</details>
 
-### Database
-- **PostgreSQL 13+** - Primary database
-- **Django ORM** - Object-relational mapping
-- **Database migrations** - Schema management
-- **Backup tools** - Data protection
+<details>
+  <summary><b>Database</b></summary>
+  <ul>
+    <li><b>PostgreSQL 13+</b> - Primary database</li>
+    <li><b>Django ORM</b> - Object-relational mapping</li>
+    <li><b>Database migrations</b> - Schema management</li>
+    <li><b>Backup tools</b> - Data protection</li>
+  </ul>
+</details>
 
-### Deployment
-- **Docker** - Containerization
-- **Nginx** - Web server
-- **Gunicorn** - WSGI server
-- **GitHub Actions** - CI/CD pipeline
+<details>
+  <summary><b>Deployment</b></summary>
+  <ul>
+    <li><b>Docker</b> - Containerization</li>
+    <li><b>Nginx</b> - Web server</li>
+    <li><b>Gunicorn</b> - WSGI server</li>
+    <li><b>GitHub Actions</b> - CI/CD pipeline</li>
+  </ul>
+</details>
 
 ## 🚀 Getting Started
 
@@ -66,104 +124,128 @@ The system follows Django's MVT (Model-View-Template) architecture with:
 
 ### Installation
 
-1. **Clone repository**
-```bash
-git clone https://github.com/nurpratapkarki/insurance-management.git
-cd insurance-management
-```
-
-2. **Set up virtual environment**
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. **Install dependencies**
-```bash
-pip install -r requirements.txt
-```
-
-4. **Configure environment**
-```bash
-# Create .env file with the following content:
+<ol>
+  <li>
+    <b>Clone repository</b>
+    <pre><code>git clone https://github.com/nurpratapkarki/insurance-management.git
+cd insurance-management</code></pre>
+  </li>
+  <li>
+    <b>Set up virtual environment</b>
+    <pre><code>python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate</code></pre>
+  </li>
+  <li>
+    <b>Install dependencies</b>
+    <pre><code>pip install -r requirements.txt</code></pre>
+  </li>
+  <li>
+    <b>Configure environment</b>
+    <pre><code># Create .env file with the following content:
 DEBUG=True
 SECRET_KEY=your-secret-key
-DATABASE_URL=postgres://username:password@localhost:5432/insurance_db
-```
-
-5. **Run migrations**
-```bash
-python manage.py migrate
-```
-
-6. **Create admin user**
-```bash
-python manage.py createsuperuser
-```
-
-7. **Launch server**
-```bash
-python manage.py runserver
-```
-Visit `http://localhost:8000/admin/` to access the system.
+DATABASE_URL=postgres://username:password@localhost:5432/insurance_db</code></pre>
+  </li>
+  <li>
+    <b>Run migrations</b>
+    <pre><code>python manage.py migrate</code></pre>
+  </li>
+  <li>
+    <b>Create admin user</b>
+    <pre><code>python manage.py createsuperuser</code></pre>
+  </li>
+  <li>
+    <b>Launch server</b>
+    <pre><code>python manage.py runserver</code></pre>
+    Visit <code>http://localhost:8000/admin/</code> to access the system.
+  </li>
+</ol>
 
 ## 📊 Core Modules
 
-### 👥 User Management
-Multi-level user hierarchy with specialized roles:
-- **Superadmins** - Complete system access
-- **Company Admins** - Organization-wide management
-- **Branch Admins** - Branch-specific operations
-- **Underwriters** - Risk assessment and approvals
-- **Agents** - Policy sales and customer management
-- **Policyholders** - Self-service portal
+<details open>
+  <summary><b>👥 User Management</b></summary>
+  <p>Multi-level user hierarchy with specialized roles:</p>
+  <ul>
+    <li><b>Superadmins</b> - Complete system access</li>
+    <li><b>Company Admins</b> - Organization-wide management</li>
+    <li><b>Branch Admins</b> - Branch-specific operations</li>
+    <li><b>Underwriters</b> - Risk assessment and approvals</li>
+    <li><b>Agents</b> - Policy sales and customer management</li>
+    <li><b>Policyholders</b> - Self-service portal</li>
+  </ul>
+</details>
 
-### 📝 Policy Management
-Configure and manage all aspects of insurance policies:
-- Multiple policy types (Term, Endowment, etc.)
-- Customizable policy parameters
-- Document management
-- Underwriting workflows
-- Policy lifecycle tracking
+<details>
+  <summary><b>📝 Policy Management</b></summary>
+  <p>Configure and manage all aspects of insurance policies:</p>
+  <ul>
+    <li>Multiple policy types (Term, Endowment, etc.)</li>
+    <li>Customizable policy parameters</li>
+    <li>Document management</li>
+    <li>Underwriting workflows</li>
+    <li>Policy lifecycle tracking</li>
+  </ul>
+</details>
 
-### 💰 Premium Management
-Comprehensive premium handling:
-- Risk-based calculation engine
-- Multiple payment frequencies
-- Late payment processing
-- Nepal tax compliance (VAT, service tax)
-- Receipt generation
+<details>
+  <summary><b>💰 Premium Management</b></summary>
+  <p>Comprehensive premium handling:</p>
+  <ul>
+    <li>Risk-based calculation engine</li>
+    <li>Multiple payment frequencies</li>
+    <li>Late payment processing</li>
+    <li>Nepal tax compliance (VAT, service tax)</li>
+    <li>Receipt generation</li>
+  </ul>
+</details>
 
-### ⚠️ Claims Processing
-End-to-end claims workflow:
-- Multi-stage verification
-- Document management
-- Benefit calculation
-- Loan adjustment
-- Payment tracking
+<details>
+  <summary><b>⚠️ Claims Processing</b></summary>
+  <p>End-to-end claims workflow:</p>
+  <ul>
+    <li>Multi-stage verification</li>
+    <li>Document management</li>
+    <li>Benefit calculation</li>
+    <li>Loan adjustment</li>
+    <li>Payment tracking</li>
+  </ul>
+</details>
 
-### 💸 Loan Management
-Policy-secured loan processing:
-- Eligibility calculation
-- Interest accrual
-- Repayment tracking
-- Integration with claims/surrender
+<details>
+  <summary><b>💸 Loan Management</b></summary>
+  <p>Policy-secured loan processing:</p>
+  <ul>
+    <li>Eligibility calculation</li>
+    <li>Interest accrual</li>
+    <li>Repayment tracking</li>
+    <li>Integration with claims/surrender</li>
+  </ul>
+</details>
 
-### 🤝 Agent Management
-Complete agent lifecycle:
-- Licensing and credentials
-- Performance tracking
-- Commission calculation
-- Hierarchical structures
-- Document storage
+<details>
+  <summary><b>🤝 Agent Management</b></summary>
+  <p>Complete agent lifecycle:</p>
+  <ul>
+    <li>Licensing and credentials</li>
+    <li>Performance tracking</li>
+    <li>Commission calculation</li>
+    <li>Hierarchical structures</li>
+    <li>Document storage</li>
+  </ul>
+</details>
 
-### 📄 Surrender Processing
-Handle policy surrenders:
-- Calculation of surrender values
-- Loan adjustment
-- Documentation
-- Certificate generation
-- Multi-step approval workflow
+<details>
+  <summary><b>📄 Surrender Processing</b></summary>
+  <p>Handle policy surrenders:</p>
+  <ul>
+    <li>Calculation of surrender values</li>
+    <li>Loan adjustment</li>
+    <li>Documentation</li>
+    <li>Certificate generation</li>
+    <li>Multi-step approval workflow</li>
+  </ul>
+</details>
 
 ## 👩‍💼 Admin Guide
 
@@ -205,4 +287,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ---
 
-Developed by [Nur Pratap Karki](https://github.com/nurpratapkarki) | © 2025 All Rights Reserved
+<p align="center">Developed by <a href="https://github.com/nurpratapkarki">Nur Pratap Karki</a> | © 2025 All Rights Reserved</p>
