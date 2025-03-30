@@ -1257,4 +1257,30 @@ class PolicyHolderAdmin(BranchFilterMixin, admin.ModelAdmin):
         branch = getattr(request.user.profile, 'branch', None)
         return qs.filter(branch=branch) if branch else qs.none()
     
+# Register SalesAgent
+@admin.register(SalesAgent)
+class SalesAgentAdmin(BranchFilterMixin, admin.ModelAdmin):
+    list_display = ('agent_code', 'get_full_name', 'branch', 'phone_number', 'commission_rate', 'is_active', 'status')
+    search_fields = ('agent_code', 'phone_number', 'application__first_name', 'application__last_name')
+    list_filter = ('branch', 'is_active', 'status')
+    readonly_fields = ('agent_code', 'total_policies_sold', 'total_premium_collected')
+    fieldsets = (
+        ('Agent Information', {
+            'fields': ('user', 'branch', 'application', 'agent_code', 'phone_number', 'email', 'is_active')
+        }),
+        ('Commission Details', {
+            'fields': ('commission_rate', 'total_policies_sold', 'total_premium_collected', 'last_policy_date')
+        }),
+        ('Status Information', {
+            'fields': ('status', 'joining_date', 'termination_date', 'termination_reason')
+        }),
+    )
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs
+        branch = getattr(request.user.profile, 'branch', None)
+        return qs.filter(branch=branch) if branch else qs.none()
+    
     
