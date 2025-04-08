@@ -59,58 +59,31 @@ def transaction_retry(max_attempts=3, delay=1):
 # Signal dispatch order control with dispatch_uid
 @receiver(post_save, sender=PolicyHolder, dispatch_uid="policy_holder_post_save_handler")
 def policy_holder_post_save(sender, instance, created, **kwargs):
-    """
-    Master signal handler for all PolicyHolder post-save operations.
-    This ensures operations happen in the correct order within a transaction.
-    """
-    # Skip if this is a signal-triggered save to prevent recursion
     if getattr(instance, '_skip_signal', False):
         return
-        
+
     try:
-        with transaction.atomic():
-            # Create/update underwriting before premium management
-            if instance.status in ['Pending', 'Active']:
-                underwriting, created = Underwriting.objects.get_or_create(policy_holder=instance)
-                # Update underwriting without triggering recursion
-                if not getattr(underwriting, '_from_signal', False):
-                    underwriting._from_signal = True
-                    underwriting.save()
-                    underwriting._from_signal = False
-            
-            # Create/update premium payment for approved/active policies
-            if instance.status in ['Approved', 'Active']:
-                premium, created = PremiumPayment.objects.get_or_create(
-                    policy_holder=instance,
-                    defaults={
-                        'payment_interval': instance.payment_interval,
-                        'payment_mode': instance.payment_mode
-                    }
-                )
-                if not created:
-                    premium.save()  # Ensure calculations are updated
-                
-            # Handle policy maturity date calculation
-            if created or not instance.maturity_date:
-                if instance.start_date and instance.duration_years:
-                    instance._skip_signal = True  # Prevent recursion
-                    instance.calculate_maturity_date()
-                    instance.save(update_fields=['maturity_date'])
-                    instance._skip_signal = False
-                    
-            # Update agent statistics
-            if created and instance.agent:
-                update_agent_stats(instance)
-                
-            # Check for policy anniversary (if not a new policy)
-            if not created and instance.status == 'Active':
-                check_policy_anniversary(instance)
-                
+        instance._skip_signal = True  # Prevent recursion
+
+        # Create/update underwriting
+        if instance.status in ['Pending', 'Active']:
+            underwriting, created = Underwriting.objects.get_or_create(policy_holder=instance)
+            underwriting.save()
+
+        # Create/update premium payment
+        if instance.status in ['Approved', 'Active']:
+            premium, created = PremiumPayment.objects.get_or_create(policy_holder=instance)
+            premium.save()
+
+        # Calculate maturity date
+        if created or not instance.maturity_date:
+            instance.maturity_date = instance.calculate_maturity_date()
+            instance.save(update_fields=['maturity_date'])
+
     except Exception as e:
         logger.error(f"Error in policy_holder_post_save for policy ID {instance.id}: {str(e)}")
-        # Don't re-raise to avoid disrupting the user experience
-        # But consider alerting an admin in production
-
+    finally:
+        instance._skip_signal = False
 def update_agent_stats(policy_holder):
     """Extract agent statistics update logic to a separate function for clarity"""
     try:
@@ -240,77 +213,74 @@ def premium_payment_post_save(sender, instance, created, **kwargs):
         logger.error(f"Error in premium_payment_post_save: {e}")
 
 def update_policy_holder_payment_status(policy_holder):
-    """Update the payment status of a PolicyHolder based on premium payments."""
+    if getattr(policy_holder, '_skip_signal', False):
+        return
+
     try:
-        # Get the premium payment for this policy
+        policy_holder._skip_signal = True  # Prevent recursion
+
         premium_payment = policy_holder.premium_payments.first()
-        
         if not premium_payment:
             return
-            
-        # Log current values
-        logger.info(f"Updating payment status for {policy_holder.id}: " 
-                   f"total_paid={premium_payment.total_paid}, "
-                   f"total_premium={premium_payment.total_premium}")
-            
-        # Determine payment status
+
         if premium_payment.total_paid >= premium_payment.total_premium:
             policy_holder.payment_status = 'Paid'
         elif premium_payment.total_paid > 0:
             policy_holder.payment_status = 'Partially Paid'
         else:
             policy_holder.payment_status = 'Unpaid'
-            
+
         policy_holder.save(update_fields=['payment_status'])
-        logger.info(f"Updated {policy_holder.id} status to {policy_holder.payment_status}")
-            
+
     except Exception as e:
         logger.error(f"Error in update_policy_holder_payment_status: {e}")
-
+    finally:
+        policy_holder._skip_signal = False
 def update_agent_report_and_commission(premium_payment):
-    """Update agent report and commission when a premium payment is made."""
     try:
         policy_holder = premium_payment.policy_holder
-        
+
         # Skip if no agent is assigned
         if not hasattr(policy_holder, 'agent') or not policy_holder.agent:
             return
-            
+
         # Get or create agent report
+        today = date.today()
         report, created = AgentReport.objects.get_or_create(
             agent=policy_holder.agent,
-            month=date.today().month,
-            year=date.today().year
+            branch=policy_holder.agent.branch,
+            report_date=today.replace(day=1),  # First day of the current month
+            defaults={
+                'reporting_period': f"{today.year}-{today.month}",
+                'policies_sold': 0,
+                'total_premium': Decimal('0.00'),
+                'commission_earned': Decimal('0.00'),
+                'target_achievement': Decimal('0.00'),
+                'renewal_rate': Decimal('0.00'),
+                'customer_retention': Decimal('0.00'),
+                'month': today.month,
+                'year': today.year,
+            }
         )
-        
-        # Calculate commission amount
-        commission_rate = getattr(policy_holder.agent, 'commission_rate', None)
-        if not commission_rate:
-            commission_rate = Decimal('0.15')  # Default 15%
-            
-        # Only calculate commission on the newly paid amount
+
+        # Update report fields
+        report.total_premium += premium_payment.paid_amount
+        report.save()
+
+        # Calculate and create commission
+        commission_rate = policy_holder.agent.commission_rate or Decimal('0.15')
         commission_amount = premium_payment.paid_amount * commission_rate
-        
-        # Create commission record
         if commission_amount > 0:
             Commission.objects.create(
                 agent=policy_holder.agent,
                 policy_holder=policy_holder,
                 amount=commission_amount,
-                date=date.today(),
+                date=today,
                 status='Pending'
             )
-            
-            # Update agent report
-            report.total_premium = F('total_premium') + premium_payment.paid_amount
-            report.total_commission = F('total_commission') + commission_amount
-            report.save()
-            
-            logger.info(f"Created commission of {commission_amount} for agent {policy_holder.agent.id}")
-            
+
     except Exception as e:
         logger.error(f"Error in update_agent_report_and_commission: {e}")
-        
         
 @receiver(post_save, sender='app.PolicyHolder')
 def policy_holder_post_save(sender, instance, created, **kwargs):

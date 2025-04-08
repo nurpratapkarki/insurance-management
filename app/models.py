@@ -1633,19 +1633,22 @@ class PremiumPayment(models.Model):
     def calculate_gsv(self):
         """Calculate Guaranteed Surrender Value (GSV)."""
         try:
-            duration_years = (date.today() - self.policy_holder.start_date).days // 365
+            if not self.policy_holder or not self.policy_holder.policy:
+                return Decimal(0.00)
+    
             gsv_rate = self.policy_holder.policy.gsv_rates.filter(
-                min_year__lte=duration_years, max_year__gte=duration_years
+                min_year__lte=self.policy_holder.duration_years,
+                max_year__gte=self.policy_holder.duration_years
             ).first()
-
+    
             if not gsv_rate:
-                return Decimal('0.00')  # No GSV defined for current duration
-
-            paid_premium = max(self.total_paid - self.annual_premium, Decimal('0.00'))
-            return (paid_premium * gsv_rate.rate / Decimal(100)).quantize(Decimal('1.00'))
+                return Decimal(0.00)
+    
+            gsv = (self.policy_holder.sum_assured * gsv_rate.rate / 100).quantize(Decimal('0.01'))
+            return gsv
         except Exception as e:
-            raise ValidationError(f"Error calculating GSV: {e}")
-
+            logger.error(f"Error calculating GSV: {e}")
+            return Decimal(0.00)
     def calculate_ssv(self):
         """Calculate Special Surrender Value (SSV)."""
         if self.policy_holder.policy.policy_type != "Endowment":

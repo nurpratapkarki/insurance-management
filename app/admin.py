@@ -11,14 +11,13 @@ from django.utils.html import format_html, mark_safe
 from django.template.loader import render_to_string
 from django.utils.safestring import mark_safe
 from django.db.models.signals import post_save
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from django.core.exceptions import ValidationError
 from django.urls import reverse
 from django.utils.html import format_html
 from django.contrib import messages
 from django.contrib.admin import site
-from django.db.models import Sum, Count, Avg
-from .views import manage_mortality_rates  
+from django.db.models import Sum
 from .frontend_data import *
 from .models import (
     InsurancePolicy, SalesAgent, PolicyHolder, Underwriting,
@@ -26,23 +25,12 @@ from .models import (
     EmployeePosition, Employee, PaymentProcessing, Branch, Company, AgentReport, AgentApplication, Occupation, DurationFactor, GSVRate, SSVConfig, Bonus, BonusRate, Loan, LoanRepayment,UserProfile, OTP, Commission, PolicySurrender, PolicyRenewal
 )
 from decimal import Decimal, InvalidOperation as DecimalException
-import logging
+
 from django.utils.translation import gettext_lazy as _
 from django.template.response import TemplateResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.admin.models import LogEntry, ADDITION, CHANGE, DELETION
 from django.contrib.contenttypes.models import ContentType
-from django.db.models import F
-from django.utils import timezone, translation
-from django.http import HttpResponse, JsonResponse
-from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
-import json
-import os
-import uuid
-from django.db.models import Sum, Q, Count, F, Value, FloatField
-from django.db.models.functions import Cast, Coalesce, Concat
-import csv
-import calendar
 
 # Mixin for filtering 'Branch' and 'user' fields
 class BranchFilterMixin:
@@ -77,7 +65,8 @@ class GSVRateInline(admin.TabularInline):
 class SSVConfigInline(admin.TabularInline):
     model = SSVConfig
     extra = 0
-    
+
+
 # Register Insurance Policy
 @admin.register(InsurancePolicy)
 class InsurancePolicyAdmin(admin.ModelAdmin):
@@ -176,7 +165,7 @@ class PremiumPaymentForm(forms.ModelForm):
 @admin.register(PremiumPayment)
 class PremiumPaymentAdmin(admin.ModelAdmin, BranchFilterMixin):
     list_display = ('policy_holder', 'annual_premium', 'interval_payment', 'total_premium',
-                    'total_paid', 'payment_status', 'next_payment_date', 'fine_status', 'action_buttons')
+                    'total_paid', 'payment_status', 'next_payment_date', 'fine_status', )
     readonly_fields = ('annual_premium', 'gsv_value', 'ssv_value', 'total_premium', 'total_paid',
                        'remaining_premium', 'payment_status', 'next_payment_date', 'fine_due', 'fine_paid')
     search_fields = ('policy_holder__first_name', 'policy_holder__last_name', 'policy_holder__policy_number')
@@ -190,62 +179,40 @@ class PremiumPaymentAdmin(admin.ModelAdmin, BranchFilterMixin):
         branch = getattr(request.user.profile, 'branch', None)
         return qs.filter(policy_holder__branch=branch) if branch else qs.none()
         
-    def action_buttons(self, obj):
-        """Generate action buttons for premium payments"""
-        buttons = []
-        
-        # Payment button
-        if obj.payment_status != 'Paid' and obj.policy_holder.status not in ['Surrendered', 'Expired']:
-            payment_amount = obj.interval_payment
-            
-            # Show different payment options if there's a fine
-            if obj.fine_due > 0:
-                # Option 1: Pay premium only
-                buttons.append(
-                    f'<a class="button" href="#" onclick="makePayment({obj.id}, {payment_amount})" '
-                    f'style="background-color: #3498db; color: white; margin-right: 5px;">'
-                    f'Pay Premium (₹{payment_amount})</a>'
-                )
-                
-                # Option 2: Pay premium + fine
-                total_with_fine = payment_amount + obj.fine_due
-                buttons.append(
-                    f'<a class="button" href="#" onclick="makePayment({obj.id}, {total_with_fine})" '
-                    f'style="background-color: #e74c3c; color: white; margin-right: 5px;">'
-                    f'Pay Premium + Fine (₹{total_with_fine})</a>'
-                )
-                
-                # Option 3: Pay fine only (if current period is already paid)
-                if obj.is_current_period_paid():
-                    buttons.append(
-                        f'<a class="button" href="#" onclick="makePayment({obj.id}, {obj.fine_due})" '
-                        f'style="background-color: #f39c12; color: white;">'
-                        f'Pay Fine Only (₹{obj.fine_due})</a>'
-                    )
-            else:
-                # Standard payment button
-                buttons.append(
-                    f'<a class="button" href="#" onclick="makePayment({obj.id}, {payment_amount})" '
-                    f'style="background-color: #2ecc71; color: white;">'
-                    f'Make Payment (₹{payment_amount})</a>'
-                )
-        
-        # Add custom JavaScript for payment actions
-        if buttons:
-            js = '''
-            <script type="text/javascript">
-                function makePayment(id, amount) {
-                    if (confirm("Process payment of ₹" + amount + "?")) {
-                        window.location.href = "/admin/app/premiumpayment/" + id + "/payment/?amount=" + amount;
-                    }
-                }
-            </script>
-            '''
-            buttons.append(js)
-            
-        return format_html(''.join(buttons))
+    # @admin.display(description="Actions")
+    # def action_buttons(self, obj):
+    #  buttons = []
+
+    # # Download Invoice Button
+    #  buttons.append(
+    #     format_html(
+    #         '<a class="button btn btn-success" href="{}" title="Download this invoice">Download Invoice</a>&nbsp;',
+    #         reverse("admin:download_invoice", args=[obj.pk]),
+    #     )
+    # )
+
+    # # Send Invoice Button
+    #  buttons.append(
+    #     format_html(
+    #         '<a class="button btn btn-warning" href="{}" title="Send this invoice">Send Invoice</a>&nbsp;',
+    #         reverse("admin:send_invoice", args=[obj.pk]),
+    #     )
+    # )
+
+    # # Delete Button with JS Confirm (escaped curly braces!)
+    #  buttons.append(
+    #     format_html(
+    #         '<button class="button btn btn-danger" '
+    #         'onclick="if(confirm(\'Are you sure you want to delete this?\')) {{ window.location.href=\'{}\' }}" '
+    #         'title="Delete this payment">Delete</button>',
+    #         reverse("admin:delete_payment", args=[obj.pk]),
+    #     )
+    # )
+
+    # # Join and return all buttons as safe HTML
+    #  return format_html("".join(buttons))
     
-    action_buttons.short_description = "Actions"
+    # action_buttons.short_description = "Actions"
     
     def fine_status(self, obj):
         """Display fine status with visual indicator"""
@@ -270,6 +237,11 @@ class PremiumPaymentAdmin(admin.ModelAdmin, BranchFilterMixin):
             path('<path:object_id>/payment/', 
                  self.admin_site.admin_view(self.process_payment),
                  name='premiumpayment_payment'),
+            path(
+                '<path:object_id>/download-invoice/',
+                self.admin_site.admin_view(self.process_payment),
+                name='download_invoice')
+            
         ]
         return my_urls + urls
     
